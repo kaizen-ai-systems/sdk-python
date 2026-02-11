@@ -8,7 +8,7 @@ version = "1.0.0"
 description = "Official Python SDK for Kaizen AI Systems - Akuma, Enzan, Sōzō"
 readme = "README.md"
 license = "MIT"
-authors = [{ name = "Kaizen AI Systems", email = "dev@kaizen.run" }]
+authors = [{ name = "Kaizen AI Systems", email = "dev@kaizenaisystems.com" }]
 keywords = ["kaizen", "akuma", "enzan", "sozo", "nl-to-sql", "gpu-cost", "synthetic-data", "ai", "llm"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -32,10 +32,10 @@ pandas = ["pandas>=2.0.0"]
 dev = ["pytest>=7.0.0", "pytest-asyncio>=0.21.0", "ruff>=0.1.0", "mypy>=1.0.0"]
 
 [project.urls]
-Homepage = "https://kaizen.run"
-Documentation = "https://docs.kaizen.run"
-Repository = "https://github.com/kaizen-ai/sdk-python"
-Issues = "https://github.com/kaizen-ai/sdk-python/issues"
+Homepage = "https://www.kaizenaisystems.com"
+Documentation = "https://www.kaizenaisystems.com"
+Repository = "https://github.com/kaizen-ai-systems/sdk-python"
+Issues = "https://github.com/kaizen-ai-systems/sdk-python/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["kaizen"]

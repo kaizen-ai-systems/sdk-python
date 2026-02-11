@@ -224,7 +224,7 @@ class HttpClient:
 
     def __init__(
         self,
-        base_url: str = "https://api.kaizen.run",
+        base_url: str = "https://api.kaizenaisystems.com",
         api_key: str = "",
         timeout: float = 30.0,
     ):
@@ -623,7 +623,7 @@ class KaizenClient:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        base_url: str = "https://api.kaizen.run",
+        base_url: str = "https://api.kaizenaisystems.com",
         timeout: float = 30.0,
     ):
         key = api_key or os.environ.get("KAIZEN_API_KEY", "")

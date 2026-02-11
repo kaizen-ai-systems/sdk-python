@@ -1,6 +1,6 @@
 # kaizen-sdk
 
-Official Python SDK for [Kaizen AI Systems](https://kaizen.run).
+Official Python SDK for [Kaizen AI Systems](https://www.kaizenaisystems.com).
 
 ## Installation
 
@@ -170,7 +170,7 @@ from kaizen import KaizenClient
 # Create custom client
 client = KaizenClient(
     api_key="your-api-key",
-    base_url="https://api.kaizen.run",
+    base_url="https://api.kaizenaisystems.com",
     timeout=30.0
 )
 
