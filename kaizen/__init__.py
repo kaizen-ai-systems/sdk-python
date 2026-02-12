@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import httpx
 
@@ -52,11 +52,11 @@ CorrelationType = Literal["positive", "negative"]
 class Guardrails:
     """Security guardrails for Akuma queries."""
     read_only: bool = True
-    allow_tables: Optional[list[str]] = None
-    deny_tables: Optional[list[str]] = None
-    deny_columns: Optional[list[str]] = None
-    max_rows: Optional[int] = None
-    timeout_secs: Optional[int] = None
+    allow_tables: list[str] | None = None
+    deny_tables: list[str] | None = None
+    deny_columns: list[str] | None = None
+    max_rows: int | None = None
+    timeout_secs: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = {"readOnly": self.read_only}
@@ -77,11 +77,11 @@ class Guardrails:
 class AkumaQueryResponse:
     """Response from Akuma query."""
     sql: str
-    rows: Optional[list[dict[str, Any]]] = None
-    explanation: Optional[str] = None
-    tables: Optional[list[str]] = None
-    warnings: Optional[list[str]] = None
-    error: Optional[str] = None
+    rows: list[dict[str, Any]] | None = None
+    explanation: str | None = None
+    tables: list[str] | None = None
+    warnings: list[str] | None = None
+    error: str | None = None
 
 
 @dataclass
@@ -99,10 +99,10 @@ class EnzanSummaryRow:
     requests: int
     tokens_in: int
     tokens_out: int
-    project: Optional[str] = None
-    model: Optional[str] = None
-    team: Optional[str] = None
-    provider: Optional[str] = None
+    project: str | None = None
+    model: str | None = None
+    team: str | None = None
+    provider: str | None = None
 
 
 @dataclass
@@ -125,8 +125,8 @@ class EnzanResource:
     gpu_type: str
     gpu_count: int
     hourly_rate: float
-    region: Optional[str] = None
-    labels: Optional[dict[str, str]] = None
+    region: str | None = None
+    labels: dict[str, str] | None = None
 
 
 @dataclass
@@ -144,11 +144,11 @@ class EnzanAlert:
 class SozoColumnStats:
     """Statistics for a generated column."""
     type: str
-    min: Optional[float] = None
-    max: Optional[float] = None
-    mean: Optional[float] = None
-    unique_count: Optional[int] = None
-    values: Optional[dict[str, int]] = None
+    min: float | None = None
+    max: float | None = None
+    mean: float | None = None
+    unique_count: int | None = None
+    values: dict[str, int] | None = None
 
 
 @dataclass
@@ -196,7 +196,7 @@ class SozoSchemaInfo:
 
 class KaizenError(Exception):
     """Base exception for Kaizen SDK."""
-    def __init__(self, message: str, status: Optional[int] = None, code: Optional[str] = None):
+    def __init__(self, message: str, status: int | None = None, code: str | None = None):
         super().__init__(message)
         self.status = status
         self.code = code
@@ -210,14 +210,14 @@ class KaizenAuthError(KaizenError):
 
 class KaizenRateLimitError(KaizenError):
     """Rate limit exceeded."""
-    def __init__(self, message: str = "Rate limit exceeded", retry_after: Optional[int] = None):
+    def __init__(self, message: str = "Rate limit exceeded", retry_after: int | None = None):
         super().__init__(message, 429, "RATE_LIMIT")
         self.retry_after = retry_after
 
 
 class KaizenValidationError(KaizenError):
     """Validation error."""
-    def __init__(self, message: str, field: Optional[str] = None):
+    def __init__(self, message: str, field: str | None = None):
         super().__init__(message, 400, "VALIDATION_ERROR")
         self.field = field
 
@@ -249,7 +249,7 @@ class HttpClient:
         self,
         method: str,
         path: str,
-        json_data: Optional[dict[str, Any]] = None,
+        json_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         headers = {
@@ -299,8 +299,8 @@ class AkumaClient:
         dialect: SQLDialect,
         prompt: str,
         mode: QueryMode = "sql-only",
-        max_rows: Optional[int] = None,
-        guardrails: Optional[Guardrails] = None,
+        max_rows: int | None = None,
+        guardrails: Guardrails | None = None,
     ) -> AkumaQueryResponse:
         """
         Translate natural language to SQL.
@@ -379,8 +379,8 @@ class EnzanClient:
     def summary(
         self,
         window: TimeWindow = "24h",
-        group_by: Optional[list[GroupByDimension]] = None,
-        filters: Optional[dict[str, list[str]]] = None,
+        group_by: list[GroupByDimension] | None = None,
+        filters: dict[str, list[str]] | None = None,
     ) -> EnzanSummaryResponse:
         """
         Get GPU cost summary for a time window.
@@ -536,10 +536,10 @@ class SozoClient:
     def generate(
         self,
         records: int,
-        schema: Optional[dict[str, str]] = None,
-        schema_name: Optional[str] = None,
-        correlations: Optional[dict[str, CorrelationType]] = None,
-        seed: Optional[int] = None,
+        schema: dict[str, str] | None = None,
+        schema_name: str | None = None,
+        correlations: dict[str, CorrelationType] | None = None,
+        seed: int | None = None,
     ) -> SozoGenerateResponse:
         """
         Generate synthetic data.
@@ -634,7 +634,7 @@ class KaizenClient:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         base_url: str = "https://api.kaizenaisystems.com",
         timeout: float = 30.0,
     ):
