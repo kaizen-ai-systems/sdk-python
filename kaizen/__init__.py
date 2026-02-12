@@ -7,9 +7,8 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Union
+from dataclasses import dataclass
+from typing import Any, Literal, Optional
 
 import httpx
 
@@ -33,7 +32,15 @@ __all__ = [
 # TYPES
 # =============================================================================
 
-SQLDialect = Literal["postgres", "mysql", "snowflake", "bigquery", "sqlite", "redshift", "clickhouse"]
+SQLDialect = Literal[
+    "postgres",
+    "mysql",
+    "snowflake",
+    "bigquery",
+    "sqlite",
+    "redshift",
+    "clickhouse",
+]
 QueryMode = Literal["sql-only", "sql-and-results", "explain"]
 TimeWindow = Literal["1h", "24h", "7d", "30d"]
 GroupByDimension = Literal["project", "model", "team", "provider", "endpoint"]
@@ -45,13 +52,13 @@ CorrelationType = Literal["positive", "negative"]
 class Guardrails:
     """Security guardrails for Akuma queries."""
     read_only: bool = True
-    allow_tables: Optional[List[str]] = None
-    deny_tables: Optional[List[str]] = None
-    deny_columns: Optional[List[str]] = None
+    allow_tables: Optional[list[str]] = None
+    deny_tables: Optional[list[str]] = None
+    deny_columns: Optional[list[str]] = None
     max_rows: Optional[int] = None
     timeout_secs: Optional[int] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = {"readOnly": self.read_only}
         if self.allow_tables:
             d["allowTables"] = self.allow_tables
@@ -70,10 +77,10 @@ class Guardrails:
 class AkumaQueryResponse:
     """Response from Akuma query."""
     sql: str
-    rows: Optional[List[Dict[str, Any]]] = None
+    rows: Optional[list[dict[str, Any]]] = None
     explanation: Optional[str] = None
-    tables: Optional[List[str]] = None
-    warnings: Optional[List[str]] = None
+    tables: Optional[list[str]] = None
+    warnings: Optional[list[str]] = None
     error: Optional[str] = None
 
 
@@ -104,7 +111,7 @@ class EnzanSummaryResponse:
     window: str
     start_time: str
     end_time: str
-    rows: List[EnzanSummaryRow]
+    rows: list[EnzanSummaryRow]
     total_cost_usd: float
     total_gpu_hours: float
     total_requests: int
@@ -119,7 +126,7 @@ class EnzanResource:
     gpu_count: int
     hourly_rate: float
     region: Optional[str] = None
-    labels: Optional[Dict[str, str]] = None
+    labels: Optional[dict[str, str]] = None
 
 
 @dataclass
@@ -141,15 +148,15 @@ class SozoColumnStats:
     max: Optional[float] = None
     mean: Optional[float] = None
     unique_count: Optional[int] = None
-    values: Optional[Dict[str, int]] = None
+    values: Optional[dict[str, int]] = None
 
 
 @dataclass
 class SozoGenerateResponse:
     """Response from Sōzō generate."""
-    columns: List[str]
-    rows: List[Dict[str, Any]]
-    stats: Dict[str, SozoColumnStats]
+    columns: list[str]
+    rows: list[dict[str, Any]]
+    stats: dict[str, SozoColumnStats]
 
     def to_csv(self) -> str:
         """Convert to CSV string."""
@@ -180,7 +187,7 @@ class SozoGenerateResponse:
 class SozoSchemaInfo:
     """Info about a predefined schema."""
     name: str
-    columns: Dict[str, str]
+    columns: dict[str, str]
 
 
 # =============================================================================
@@ -238,7 +245,12 @@ class HttpClient:
     def set_base_url(self, url: str) -> None:
         self.base_url = url
 
-    def _request(self, method: str, path: str, json_data: Optional[Dict] = None) -> Dict[str, Any]:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        json_data: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         headers = {
             "Content-Type": "application/json",
@@ -265,10 +277,10 @@ class HttpClient:
         except httpx.RequestError as e:
             raise KaizenError(f"Request failed: {e}")
 
-    def get(self, path: str) -> Dict[str, Any]:
+    def get(self, path: str) -> dict[str, Any]:
         return self._request("GET", path)
 
-    def post(self, path: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    def post(self, path: str, data: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", path, data)
 
 
@@ -312,7 +324,7 @@ class AkumaClient:
             ... )
             >>> print(response.sql)
         """
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "dialect": dialect,
             "prompt": prompt,
             "mode": mode,
@@ -367,8 +379,8 @@ class EnzanClient:
     def summary(
         self,
         window: TimeWindow = "24h",
-        group_by: Optional[List[GroupByDimension]] = None,
-        filters: Optional[Dict[str, List[str]]] = None,
+        group_by: Optional[list[GroupByDimension]] = None,
+        filters: Optional[dict[str, list[str]]] = None,
     ) -> EnzanSummaryResponse:
         """
         Get GPU cost summary for a time window.
@@ -385,7 +397,7 @@ class EnzanClient:
             >>> summary = enzan.summary(window="24h", group_by=["project", "model"])
             >>> print(f"Total: ${summary.total_cost_usd:.2f}")
         """
-        data: Dict[str, Any] = {"window": window}
+        data: dict[str, Any] = {"window": window}
         if group_by:
             data["groupBy"] = group_by
         if filters:
@@ -417,7 +429,7 @@ class EnzanClient:
             total_requests=total.get("requests", 0),
         )
 
-    def burn(self) -> Dict[str, Any]:
+    def burn(self) -> dict[str, Any]:
         """
         Get current burn rate.
 
@@ -430,7 +442,7 @@ class EnzanClient:
         """
         return self._http.get("/v1/enzan/burn")
 
-    def list_resources(self) -> List[EnzanResource]:
+    def list_resources(self) -> list[EnzanResource]:
         """List registered GPU resources."""
         result = self._http.get("/v1/enzan/resources")
         return [
@@ -446,7 +458,7 @@ class EnzanClient:
             for r in result.get("resources", [])
         ]
 
-    def register_resource(self, resource: EnzanResource) -> Dict[str, str]:
+    def register_resource(self, resource: EnzanResource) -> dict[str, str]:
         """
         Register a GPU resource for tracking.
 
@@ -473,7 +485,7 @@ class EnzanClient:
             data["labels"] = resource.labels
         return self._http.post("/v1/enzan/resources", data)
 
-    def list_alerts(self) -> List[EnzanAlert]:
+    def list_alerts(self) -> list[EnzanAlert]:
         """List configured alerts."""
         result = self._http.get("/v1/enzan/alerts")
         return [
@@ -488,7 +500,7 @@ class EnzanClient:
             for a in result.get("alerts", [])
         ]
 
-    def create_alert(self, alert: EnzanAlert) -> Dict[str, str]:
+    def create_alert(self, alert: EnzanAlert) -> dict[str, str]:
         """
         Create a cost/usage alert.
 
@@ -524,9 +536,9 @@ class SozoClient:
     def generate(
         self,
         records: int,
-        schema: Optional[Dict[str, str]] = None,
+        schema: Optional[dict[str, str]] = None,
         schema_name: Optional[str] = None,
-        correlations: Optional[Dict[str, CorrelationType]] = None,
+        correlations: Optional[dict[str, CorrelationType]] = None,
         seed: Optional[int] = None,
     ) -> SozoGenerateResponse:
         """
@@ -562,7 +574,7 @@ class SozoClient:
         if not schema and not schema_name:
             raise KaizenValidationError("Either schema or schema_name is required")
 
-        data: Dict[str, Any] = {"records": records}
+        data: dict[str, Any] = {"records": records}
         if schema:
             data["schema"] = schema
         if schema_name:
@@ -591,7 +603,7 @@ class SozoClient:
             stats=stats,
         )
 
-    def list_schemas(self) -> List[SozoSchemaInfo]:
+    def list_schemas(self) -> list[SozoSchemaInfo]:
         """
         List available predefined schemas.
 
@@ -640,7 +652,7 @@ class KaizenClient:
         """Set the API base URL."""
         self._http.set_base_url(url)
 
-    def health(self) -> Dict[str, Any]:
+    def health(self) -> dict[str, Any]:
         """Check API health."""
         return self._http.get("/health")
 
