@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import httpx
 
@@ -59,7 +59,7 @@ class Guardrails:
     timeout_secs: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        d = {"readOnly": self.read_only}
+        d: dict[str, Any] = {"readOnly": self.read_only}
         if self.allow_tables:
             d["allowTables"] = self.allow_tables
         if self.deny_tables:
@@ -177,9 +177,9 @@ class SozoGenerateResponse:
         """Convert to JSON Lines string."""
         return "\n".join(json.dumps(row) for row in self.rows)
 
-    def to_dataframe(self):
+    def to_dataframe(self) -> Any:
         """Convert to pandas DataFrame (requires pandas)."""
-        import pandas as pd
+        import pandas as pd  # type: ignore[import-untyped]
         return pd.DataFrame(self.rows)
 
 
@@ -260,7 +260,7 @@ class HttpClient:
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 response = client.request(method, url, headers=headers, json=json_data)
-                data = response.json()
+                data = cast(dict[str, Any], response.json())
 
                 if response.status_code == 401:
                     raise KaizenAuthError(data.get("error", "Authentication failed"))
