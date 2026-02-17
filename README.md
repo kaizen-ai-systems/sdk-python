@@ -42,7 +42,7 @@ from kaizen import akuma, Guardrails
 
 # Generate SQL from natural language
 response = akuma.query(
-    dialect="postgres",  # postgres, mysql, snowflake, bigquery, sqlite
+    dialect="postgres",  # postgres, mysql, snowflake, bigquery
     prompt="Show revenue by month for 2024",
     mode="sql-and-results",  # sql-only, sql-and-results, explain
     guardrails=Guardrails(
@@ -58,6 +58,25 @@ print(response.rows)  # If mode is sql-and-results
 # Explain a SQL query
 explanation = akuma.explain("SELECT * FROM users WHERE active = true")
 print(explanation.explanation)
+
+# Set schema context (optional but recommended for accuracy)
+from kaizen import AkumaColumn, AkumaTable
+
+akuma.set_schema(
+    version="2026-02-17",
+    tables=[
+        AkumaTable(
+            name="orders",
+            description="Customer orders",
+            columns=[
+                AkumaColumn(name="id", type="uuid"),
+                AkumaColumn(name="customer_id", type="uuid"),
+                AkumaColumn(name="total_amount", type="numeric"),
+            ],
+            primary_key=["id"],
+        )
+    ],
+)
 ```
 
 ## Enzan (GPU Cost)
@@ -77,7 +96,7 @@ for row in summary.rows:
 
 # Get burn rate
 burn = enzan.burn()
-print(f"Burn rate: ${burn['burn_rate_usd_per_hour']:.2f}/hr")
+print(f"Burn rate: ${burn.burn_rate_usd_per_hour:.2f}/hr")
 
 # Register GPU resource
 enzan.register_resource(EnzanResource(

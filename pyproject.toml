@@ -39,6 +39,7 @@ Issues = "https://github.com/kaizen-ai-systems/sdk-python/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["kaizen"]
+include = ["kaizen/py.typed"]
 
 [tool.ruff]
 line-length = 100
