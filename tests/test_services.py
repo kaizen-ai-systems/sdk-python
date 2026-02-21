@@ -47,6 +47,7 @@ def test_enzan_summary_maps_response():
                 "rows": [
                     {
                         "project": "core",
+                        "endpoint": "/v1/akuma/query",
                         "cost_usd": 2.5,
                         "gpu_hours": 1.25,
                         "requests": 5,
@@ -64,4 +65,5 @@ def test_enzan_summary_maps_response():
 
     assert summary.total_cost_usd == 2.5
     assert summary.rows[0].project == "core"
+    assert summary.rows[0].endpoint == "/v1/akuma/query"
     assert summary.rows[0].tokens_out == 12

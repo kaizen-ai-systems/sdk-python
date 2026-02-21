@@ -5,6 +5,7 @@ from typing import Any
 from .._types import GroupByDimension, TimeWindow
 from ..http import HttpClient
 from ..models import (
+    APICostSummary,
     EnzanAlert,
     EnzanBurnResponse,
     EnzanResource,
@@ -43,10 +44,22 @@ class EnzanClient:
                 model=row.get("model"),
                 team=row.get("team"),
                 provider=row.get("provider"),
+                endpoint=row.get("endpoint"),
             )
             for row in result.get("rows", [])
         ]
         total = result.get("total", {})
+        raw_api_costs = result.get("apiCosts")
+        api_costs = (
+            APICostSummary(
+                total_cost_usd=raw_api_costs.get("totalCostUsd", 0),
+                prompt_tokens=raw_api_costs.get("promptTokens", 0),
+                output_tokens=raw_api_costs.get("outputTokens", 0),
+                queries=raw_api_costs.get("queries", 0),
+            )
+            if isinstance(raw_api_costs, dict)
+            else None
+        )
 
         return EnzanSummaryResponse(
             window=result.get("window", window),
@@ -56,6 +69,7 @@ class EnzanClient:
             total_cost_usd=total.get("cost_usd", 0),
             total_gpu_hours=total.get("gpu_hours", 0),
             total_requests=total.get("requests", 0),
+            api_costs=api_costs,
         )
 
     def burn(self) -> EnzanBurnResponse:

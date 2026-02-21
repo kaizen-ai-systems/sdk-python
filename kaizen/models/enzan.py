@@ -18,6 +18,7 @@ class EnzanSummaryRow:
     model: str | None = None
     team: str | None = None
     provider: str | None = None
+    endpoint: str | None = None
 
 
 @dataclass
@@ -31,6 +32,17 @@ class EnzanSummaryResponse:
     total_cost_usd: float
     total_gpu_hours: float
     total_requests: int
+    api_costs: "APICostSummary | None" = None
+
+
+@dataclass
+class APICostSummary:
+    """Estimated Akuma API token spend for the requested window."""
+
+    total_cost_usd: float
+    prompt_tokens: int
+    output_tokens: int
+    queries: int
 
 
 @dataclass
