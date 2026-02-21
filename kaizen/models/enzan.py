@@ -32,7 +32,7 @@ class EnzanSummaryResponse:
     total_cost_usd: float
     total_gpu_hours: float
     total_requests: int
-    api_costs: "APICostSummary | None" = None
+    api_costs: APICostSummary | None = None
 
 
 @dataclass

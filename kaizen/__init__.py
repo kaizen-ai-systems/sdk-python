@@ -5,9 +5,21 @@ Products: Akuma (NL→SQL) | Enzan (GPU Cost) | Sōzō (Synthetic Data)
 
 from __future__ import annotations
 
-from ._types import AlertType, CorrelationType, GroupByDimension, QueryMode, SQLDialect, TimeWindow
+from ._types import (
+    AlertType,
+    CorrelationType,
+    GroupByDimension,
+    QueryMode,
+    SQLDialect,
+    TimeWindow,
+)
 from .client import KaizenClient
-from .errors import KaizenAuthError, KaizenError, KaizenRateLimitError, KaizenValidationError
+from .errors import (
+    KaizenAuthError,
+    KaizenError,
+    KaizenRateLimitError,
+    KaizenValidationError,
+)
 from .models import (
     APICostSummary,
     AkumaColumn,
