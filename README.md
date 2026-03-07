@@ -37,6 +37,8 @@ df = data.to_dataframe()  # requires pandas
 
 ## Akuma (NL→SQL)
 
+Persisted source APIs (`set_schema`, `list_sources`, `create_source`, `sync_source`, `delete_source`) require a dashboard-created DB-backed API key. Demo keys remain schema-less.
+
 ```python
 from kaizen import akuma, Guardrails
 
@@ -63,6 +65,8 @@ print(explanation.explanation)
 from kaizen import AkumaColumn, AkumaTable
 
 akuma.set_schema(
+    name="Warehouse Manual Schema",
+    dialect="postgres",
     version="2026-02-17",
     tables=[
         AkumaTable(
@@ -77,6 +81,25 @@ akuma.set_schema(
         )
     ],
 )
+
+# Route a query through a persisted source
+response = akuma.query(
+    dialect="postgres",
+    prompt="Show revenue by month for 2024",
+    source_id="src_123",
+)
+
+# Manage persisted sources (Postgres/MySQL live sync)
+akuma.create_source(
+    name="Warehouse",
+    dialect="postgres",
+    connection_string="postgres://user:password@db.example.com:5432/app",
+    target_schemas=["public"],
+)
+
+sources = akuma.list_sources()
+akuma.sync_source(sources[0].id)
+akuma.delete_source(sources[0].id)
 ```
 
 ## Enzan (GPU Cost)

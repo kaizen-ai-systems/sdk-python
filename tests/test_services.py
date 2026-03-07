@@ -16,6 +16,9 @@ class FakeHttp:
     def get(self, path):
         return self.responses[path]
 
+    def request(self, method, path, data=None):
+        return self.responses[(method, path)]
+
 
 def test_sozo_requires_schema_or_schema_name():
     client = SozoClient(FakeHttp({}))
@@ -32,9 +35,30 @@ def test_akuma_query_posts_payload():
         }
     )
     client = AkumaClient(fake)
-    response = client.query(dialect="postgres", prompt="show one row", mode="sql-only")
+    response = client.query(dialect="postgres", prompt="show one row", mode="sql-only", source_id="src_123")
 
     assert response.sql == "select 1"
+
+
+def test_akuma_create_source_maps_response():
+    fake = FakeHttp(
+        {
+            "/v1/akuma/sources": {
+                "status": "syncing",
+                "sourceId": "src_123",
+            }
+        }
+    )
+    client = AkumaClient(fake)
+    result = client.create_source(
+        name="Warehouse",
+        dialect="postgres",
+        connection_string="postgres://user:pass@db.example.com/app",
+        target_schemas=["public"],
+    )
+
+    assert result.status == "syncing"
+    assert result.source_id == "src_123"
 
 
 def test_enzan_summary_maps_response():

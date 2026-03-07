@@ -112,8 +112,29 @@ class AkumaTable:
 
 
 @dataclass
-class AkumaSchemaResponse:
-    """Response from Akuma schema update."""
+class AkumaSource:
+    """Persisted Akuma data source."""
+
+    id: str
+    name: str
+    dialect: str
+    is_manual: bool
+    target_schemas: list[str]
+    status: str
+    created_at: str
+    updated_at: str
+    last_error: str | None = None
+    last_synced_at: str | None = None
+
+
+@dataclass
+class AkumaSourceMutationResponse:
+    """Mutation response for Akuma source operations."""
 
     status: str
-    tables: int
+    source_id: str | None = None
+    tables: int | None = None
+    source: AkumaSource | None = None
+
+
+AkumaSchemaResponse = AkumaSourceMutationResponse

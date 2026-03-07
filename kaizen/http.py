@@ -38,6 +38,9 @@ class HttpClient:
     def post(self, path: str, data: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", path, data)
 
+    def request(self, method: str, path: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request(method, path, data)
+
     def _request(
         self,
         method: str,

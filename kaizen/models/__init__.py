@@ -4,6 +4,8 @@ from .akuma import (
     AkumaForeignKey,
     AkumaQueryResponse,
     AkumaSchemaResponse,
+    AkumaSource,
+    AkumaSourceMutationResponse,
     AkumaTable,
     Guardrails,
 )
@@ -23,6 +25,8 @@ __all__ = [
     "AkumaForeignKey",
     "AkumaQueryResponse",
     "AkumaSchemaResponse",
+    "AkumaSource",
+    "AkumaSourceMutationResponse",
     "AkumaTable",
     "APICostSummary",
     "EnzanAlert",
