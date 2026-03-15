@@ -11,6 +11,7 @@ from ..models import (
     EnzanResource,
     EnzanSummaryResponse,
     EnzanSummaryRow,
+    EnzanSummaryTotal,
 )
 
 
@@ -45,6 +46,7 @@ class EnzanClient:
                 team=row.get("team"),
                 provider=row.get("provider"),
                 endpoint=row.get("endpoint"),
+                avg_util_pct=row.get("avg_util_pct"),
             )
             for row in result.get("rows", [])
         ]
@@ -66,9 +68,13 @@ class EnzanClient:
             start_time=result.get("startTime", ""),
             end_time=result.get("endTime", ""),
             rows=rows,
-            total_cost_usd=total.get("cost_usd", 0),
-            total_gpu_hours=total.get("gpu_hours", 0),
-            total_requests=total.get("requests", 0),
+            total=EnzanSummaryTotal(
+                cost_usd=total.get("cost_usd", 0),
+                gpu_hours=total.get("gpu_hours", 0),
+                requests=total.get("requests", 0),
+                tokens_in=total.get("tokens_in", 0),
+                tokens_out=total.get("tokens_out", 0),
+            ),
             api_costs=api_costs,
         )
 
@@ -89,7 +95,10 @@ class EnzanClient:
                 gpu_count=resource["gpuCount"],
                 hourly_rate=resource["hourlyRate"],
                 region=resource.get("region"),
+                endpoint=resource.get("endpoint"),
                 labels=resource.get("labels"),
+                created_at=resource.get("createdAt"),
+                last_seen_at=resource.get("lastSeenAt"),
             )
             for resource in result.get("resources", [])
         ]
@@ -104,6 +113,8 @@ class EnzanClient:
         }
         if resource.region:
             payload["region"] = resource.region
+        if resource.endpoint:
+            payload["endpoint"] = resource.endpoint
         if resource.labels:
             payload["labels"] = resource.labels
         return self._http.post("/v1/enzan/resources", payload)
@@ -117,6 +128,7 @@ class EnzanClient:
                 type=alert["type"],
                 threshold=alert["threshold"],
                 window=alert["window"],
+                labels=alert.get("labels"),
                 enabled=alert.get("enabled", True),
             )
             for alert in result.get("alerts", [])
@@ -131,6 +143,7 @@ class EnzanClient:
                 "type": alert.type,
                 "threshold": alert.threshold,
                 "window": alert.window,
+                "labels": alert.labels,
                 "enabled": alert.enabled,
             },
         )

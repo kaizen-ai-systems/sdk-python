@@ -16,6 +16,7 @@ from .enzan import (
     EnzanResource,
     EnzanSummaryResponse,
     EnzanSummaryRow,
+    EnzanSummaryTotal,
 )
 from .sozo import SozoColumnStats, SozoGenerateResponse, SozoSchemaInfo
 
@@ -34,6 +35,7 @@ __all__ = [
     "EnzanResource",
     "EnzanSummaryResponse",
     "EnzanSummaryRow",
+    "EnzanSummaryTotal",
     "Guardrails",
     "SozoColumnStats",
     "SozoGenerateResponse",

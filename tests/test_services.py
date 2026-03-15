@@ -77,9 +77,16 @@ def test_enzan_summary_maps_response():
                         "requests": 5,
                         "tokens_in": 10,
                         "tokens_out": 12,
+                        "avg_util_pct": 73.5,
                     }
                 ],
-                "total": {"cost_usd": 2.5, "gpu_hours": 1.25, "requests": 5},
+                "total": {
+                    "cost_usd": 2.5,
+                    "gpu_hours": 1.25,
+                    "requests": 5,
+                    "tokens_in": 10,
+                    "tokens_out": 12,
+                },
             }
         }
     )
@@ -87,7 +94,46 @@ def test_enzan_summary_maps_response():
     client = EnzanClient(fake)
     summary = client.summary(window="24h")
 
-    assert summary.total_cost_usd == 2.5
+    assert summary.total.cost_usd == 2.5
+    assert summary.total.tokens_in == 10
+    assert summary.total.tokens_out == 12
     assert summary.rows[0].project == "core"
     assert summary.rows[0].endpoint == "/v1/akuma/query"
     assert summary.rows[0].tokens_out == 12
+    assert summary.rows[0].avg_util_pct == 73.5
+
+
+def test_sozo_maps_stats_and_schema_descriptions():
+    fake = FakeHttp(
+        {
+            "/v1/sozo/generate": {
+                "columns": ["score"],
+                "rows": [{"score": 1.0}],
+                "stats": {
+                    "score": {
+                        "type": "float",
+                        "nullCount": 2,
+                        "mean": 1.0,
+                        "stdDev": 0.5,
+                    }
+                },
+            },
+            "/v1/sozo/schemas": {
+                "schemas": [
+                    {
+                        "name": "saas_customers_v1",
+                        "description": "Preset",
+                        "columns": {"id": "uuid4"},
+                    }
+                ]
+            },
+        }
+    )
+
+    client = SozoClient(fake)
+    generated = client.generate(records=1, schema_name="saas_customers_v1")
+    schemas = client.list_schemas()
+
+    assert generated.stats["score"].null_count == 2
+    assert generated.stats["score"].std_dev == 0.5
+    assert schemas[0].description == "Preset"

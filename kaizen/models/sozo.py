@@ -10,11 +10,11 @@ class SozoColumnStats:
     """Statistics for a generated column."""
 
     type: str
+    null_count: int = 0
     min: float | None = None
     max: float | None = None
     mean: float | None = None
-    unique_count: int | None = None
-    values: dict[str, int] | None = None
+    std_dev: float | None = None
 
 
 @dataclass
@@ -58,3 +58,4 @@ class SozoSchemaInfo:
 
     name: str
     columns: dict[str, str]
+    description: str | None = None

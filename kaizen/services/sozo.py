@@ -41,11 +41,11 @@ class SozoClient:
         for column_name, stat in result.get("stats", {}).items():
             stats[column_name] = SozoColumnStats(
                 type=stat.get("type", "unknown"),
+                null_count=stat.get("nullCount", 0),
                 min=stat.get("min"),
                 max=stat.get("max"),
                 mean=stat.get("mean"),
-                unique_count=stat.get("uniqueCount"),
-                values=stat.get("values"),
+                std_dev=stat.get("stdDev"),
             )
 
         return SozoGenerateResponse(
@@ -57,6 +57,10 @@ class SozoClient:
     def list_schemas(self) -> list[SozoSchemaInfo]:
         result = self._http.get("/v1/sozo/schemas")
         return [
-            SozoSchemaInfo(name=schema["name"], columns=schema["columns"])
+            SozoSchemaInfo(
+                name=schema["name"],
+                description=schema.get("description"),
+                columns=schema["columns"],
+            )
             for schema in result.get("schemas", [])
         ]

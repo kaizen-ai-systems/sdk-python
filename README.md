@@ -28,7 +28,7 @@ print(response.sql)
 
 # Enzan: GPU Cost Summary
 summary = enzan.summary(window="24h", group_by=["project", "model"])
-print(f"Total: ${summary.total_cost_usd:.2f}")
+print(f"Total: ${summary.total.cost_usd:.2f}")
 
 # Sōzō: Synthetic Data
 data = sozo.generate(schema_name="saas_customers_v1", records=10000)
@@ -113,7 +113,7 @@ summary = enzan.summary(
     group_by=["project", "model"],
     filters={"projects": ["fraud-api"]}
 )
-print(f"Total: ${summary.total_cost_usd:.2f}")
+print(f"Total: ${summary.total.cost_usd:.2f}")
 for row in summary.rows:
     print(f"  {row.project}: ${row.cost_usd:.2f}")
 
