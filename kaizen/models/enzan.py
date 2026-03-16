@@ -76,6 +76,54 @@ class APICostSummary:
 
 
 @dataclass
+class EnzanModelCategoryBreakdown:
+    """Prompt complexity breakdown for a model row."""
+
+    category: str
+    queries: int
+    prompt_tokens: int
+    output_tokens: int
+    cost_usd: float
+    percentage: float
+    avg_cost_per_query: float
+
+
+@dataclass
+class EnzanModelCostRow:
+    """Model-level spend row."""
+
+    model: str
+    queries: int
+    prompt_tokens: int
+    output_tokens: int
+    cost_usd: float
+    percentage: float
+    avg_cost_per_query: float
+    categories: list[EnzanModelCategoryBreakdown] | None = None
+
+
+@dataclass
+class EnzanModelCostTotal:
+    """Aggregate totals for model-level spend analytics."""
+
+    queries: int
+    prompt_tokens: int
+    output_tokens: int
+    cost_usd: float
+
+
+@dataclass
+class EnzanModelCostResponse:
+    """Response from Enzan model-level cost analytics."""
+
+    window: str
+    start_time: str
+    end_time: str
+    rows: list[EnzanModelCostRow]
+    total: EnzanModelCostTotal
+
+
+@dataclass
 class EnzanResource:
     """GPU resource for Enzan tracking."""
 

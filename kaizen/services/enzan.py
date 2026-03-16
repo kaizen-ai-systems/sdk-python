@@ -8,6 +8,10 @@ from ..models import (
     APICostSummary,
     EnzanAlert,
     EnzanBurnResponse,
+    EnzanModelCategoryBreakdown,
+    EnzanModelCostResponse,
+    EnzanModelCostRow,
+    EnzanModelCostTotal,
     EnzanResource,
     EnzanSummaryResponse,
     EnzanSummaryRow,
@@ -76,6 +80,50 @@ class EnzanClient:
                 tokens_out=total.get("tokens_out", 0),
             ),
             api_costs=api_costs,
+        )
+
+    def costs_by_model(self, window: TimeWindow = "30d") -> EnzanModelCostResponse:
+        result = self._http.post("/v1/enzan/costs/by-model", {"window": window})
+
+        rows = []
+        for row in result.get("rows", []):
+            categories = [
+                EnzanModelCategoryBreakdown(
+                    category=category.get("category", "moderate"),
+                    queries=category.get("queries", 0),
+                    prompt_tokens=category.get("prompt_tokens", 0),
+                    output_tokens=category.get("output_tokens", 0),
+                    cost_usd=category.get("cost_usd", 0.0),
+                    percentage=category.get("percentage", 0.0),
+                    avg_cost_per_query=category.get("avg_cost_per_query", 0.0),
+                )
+                for category in row.get("categories", [])
+            ]
+            rows.append(
+                EnzanModelCostRow(
+                    model=row.get("model", "unknown"),
+                    queries=row.get("queries", 0),
+                    prompt_tokens=row.get("prompt_tokens", 0),
+                    output_tokens=row.get("output_tokens", 0),
+                    cost_usd=row.get("cost_usd", 0.0),
+                    percentage=row.get("percentage", 0.0),
+                    avg_cost_per_query=row.get("avg_cost_per_query", 0.0),
+                    categories=categories or None,
+                )
+            )
+
+        total = result.get("total", {})
+        return EnzanModelCostResponse(
+            window=result.get("window", window),
+            start_time=result.get("startTime", ""),
+            end_time=result.get("endTime", ""),
+            rows=rows,
+            total=EnzanModelCostTotal(
+                queries=total.get("queries", 0),
+                prompt_tokens=total.get("prompt_tokens", 0),
+                output_tokens=total.get("output_tokens", 0),
+                cost_usd=total.get("cost_usd", 0.0),
+            ),
         )
 
     def burn(self) -> EnzanBurnResponse:
