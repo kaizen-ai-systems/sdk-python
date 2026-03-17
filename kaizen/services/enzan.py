@@ -8,6 +8,10 @@ from ..models import (
     APICostSummary,
     EnzanAlert,
     EnzanBurnResponse,
+    EnzanGPUPricing,
+    EnzanGPUPricingMutationResponse,
+    EnzanLLMPricing,
+    EnzanLLMPricingMutationResponse,
     EnzanModelCategoryBreakdown,
     EnzanModelCostResponse,
     EnzanModelCostRow,
@@ -123,6 +127,110 @@ class EnzanClient:
                 prompt_tokens=total.get("prompt_tokens", 0),
                 output_tokens=total.get("output_tokens", 0),
                 cost_usd=total.get("cost_usd", 0.0),
+            ),
+        )
+
+    def list_model_pricing(self) -> list[EnzanLLMPricing]:
+        result = self._http.get("/v1/enzan/pricing/models")
+        return [
+            EnzanLLMPricing(
+                provider=row.get("provider", ""),
+                model=row.get("model", ""),
+                display_name=row.get("display_name", ""),
+                input_cost_per_1k_tokens_usd=row.get("input_cost_per_1k_tokens_usd", 0.0),
+                output_cost_per_1k_tokens_usd=row.get("output_cost_per_1k_tokens_usd", 0.0),
+                currency=row.get("currency", "USD"),
+                active=row.get("active", True),
+            )
+            for row in result.get("models", [])
+        ]
+
+    def upsert_model_pricing(
+        self,
+        *,
+        provider: str,
+        model: str,
+        input_cost_per_1k_tokens_usd: float,
+        output_cost_per_1k_tokens_usd: float,
+        display_name: str | None = None,
+        currency: str | None = None,
+        active: bool | None = None,
+    ) -> EnzanLLMPricingMutationResponse:
+        payload: dict[str, Any] = {
+            "provider": provider,
+            "model": model,
+            "input_cost_per_1k_tokens_usd": input_cost_per_1k_tokens_usd,
+            "output_cost_per_1k_tokens_usd": output_cost_per_1k_tokens_usd,
+        }
+        if display_name is not None:
+            payload["display_name"] = display_name
+        if currency is not None:
+            payload["currency"] = currency
+        if active is not None:
+            payload["active"] = active
+
+        result = self._http.post("/v1/enzan/pricing/models", payload)
+        pricing = result.get("pricing", {})
+        return EnzanLLMPricingMutationResponse(
+            status=result.get("status", "upserted"),
+            pricing=EnzanLLMPricing(
+                provider=pricing.get("provider", ""),
+                model=pricing.get("model", ""),
+                display_name=pricing.get("display_name", ""),
+                input_cost_per_1k_tokens_usd=pricing.get("input_cost_per_1k_tokens_usd", 0.0),
+                output_cost_per_1k_tokens_usd=pricing.get("output_cost_per_1k_tokens_usd", 0.0),
+                currency=pricing.get("currency", "USD"),
+                active=pricing.get("active", True),
+            ),
+        )
+
+    def list_gpu_pricing(self) -> list[EnzanGPUPricing]:
+        result = self._http.get("/v1/enzan/pricing/gpus")
+        return [
+            EnzanGPUPricing(
+                provider=row.get("provider", ""),
+                gpu_type=row.get("gpu_type", ""),
+                display_name=row.get("display_name", ""),
+                hourly_rate_usd=row.get("hourly_rate_usd", 0.0),
+                currency=row.get("currency", "USD"),
+                active=row.get("active", True),
+            )
+            for row in result.get("gpus", [])
+        ]
+
+    def upsert_gpu_pricing(
+        self,
+        *,
+        provider: str,
+        gpu_type: str,
+        hourly_rate_usd: float,
+        display_name: str | None = None,
+        currency: str | None = None,
+        active: bool | None = None,
+    ) -> EnzanGPUPricingMutationResponse:
+        payload: dict[str, Any] = {
+            "provider": provider,
+            "gpu_type": gpu_type,
+            "hourly_rate_usd": hourly_rate_usd,
+        }
+        if display_name is not None:
+            payload["display_name"] = display_name
+        if currency is not None:
+            payload["currency"] = currency
+        if active is not None:
+            payload["active"] = active
+
+        result = self._http.post("/v1/enzan/pricing/gpus", payload)
+        pricing = result.get("pricing", {})
+        return EnzanGPUPricingMutationResponse(
+            status=result.get("status", "upserted"),
+            pricing=EnzanGPUPricing(
+                provider=pricing.get("provider", ""),
+                gpu_type=pricing.get("gpu_type", ""),
+                display_name=pricing.get("display_name", ""),
+                hourly_rate_usd=pricing.get("hourly_rate_usd", 0.0),
+                currency=pricing.get("currency", "USD"),
+                active=pricing.get("active", True),
             ),
         )
 

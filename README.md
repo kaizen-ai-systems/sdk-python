@@ -121,6 +121,10 @@ by_model = enzan.costs_by_model(window="30d")
 for row in by_model.rows:
     print(row.model, row.cost_usd, [c.category for c in (row.categories or [])])
 
+model_pricing = enzan.list_model_pricing()
+for row in model_pricing:
+    print(row.provider, row.model, row.input_cost_per_1k_tokens_usd, row.output_cost_per_1k_tokens_usd)
+
 # Get burn rate
 burn = enzan.burn()
 print(f"Burn rate: ${burn.burn_rate_usd_per_hour:.2f}/hr")

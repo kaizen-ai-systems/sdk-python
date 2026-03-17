@@ -124,6 +124,47 @@ class EnzanModelCostResponse:
 
 
 @dataclass
+class EnzanLLMPricing:
+    """LLM pricing catalog row."""
+
+    provider: str
+    model: str
+    display_name: str
+    input_cost_per_1k_tokens_usd: float
+    output_cost_per_1k_tokens_usd: float
+    currency: str
+    active: bool
+
+
+@dataclass
+class EnzanGPUPricing:
+    """GPU pricing catalog row."""
+
+    provider: str
+    gpu_type: str
+    display_name: str
+    hourly_rate_usd: float
+    currency: str
+    active: bool
+
+
+@dataclass
+class EnzanLLMPricingMutationResponse:
+    """Response from an LLM pricing upsert."""
+
+    status: str
+    pricing: EnzanLLMPricing
+
+
+@dataclass
+class EnzanGPUPricingMutationResponse:
+    """Response from a GPU pricing upsert."""
+
+    status: str
+    pricing: EnzanGPUPricing
+
+
+@dataclass
 class EnzanResource:
     """GPU resource for Enzan tracking."""
 

@@ -137,3 +137,43 @@ def test_sozo_maps_stats_and_schema_descriptions():
     assert generated.stats["score"].null_count == 2
     assert generated.stats["score"].std_dev == 0.5
     assert schemas[0].description == "Preset"
+
+
+def test_enzan_pricing_catalog_maps_responses():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/pricing/models": {
+                "models": [
+                    {
+                        "provider": "openai",
+                        "model": "gpt-4o-mini",
+                        "display_name": "GPT-4o mini",
+                        "input_cost_per_1k_tokens_usd": 0.00015,
+                        "output_cost_per_1k_tokens_usd": 0.0006,
+                        "currency": "USD",
+                        "active": True,
+                    }
+                ]
+            },
+            "/v1/enzan/pricing/gpus": {
+                "status": "upserted",
+                "pricing": {
+                    "provider": "runpod",
+                    "gpu_type": "h100",
+                    "display_name": "H100",
+                    "hourly_rate_usd": 1.99,
+                    "currency": "USD",
+                    "active": True,
+                },
+            },
+        }
+    )
+
+    client = EnzanClient(fake)
+    models = client.list_model_pricing()
+    gpu = client.upsert_gpu_pricing(provider="runpod", gpu_type="h100", hourly_rate_usd=1.99)
+
+    assert models[0].model == "gpt-4o-mini"
+    assert models[0].input_cost_per_1k_tokens_usd == 0.00015
+    assert gpu.status == "upserted"
+    assert gpu.pricing.gpu_type == "h100"
