@@ -16,6 +16,8 @@ from ..models import (
     EnzanModelCostResponse,
     EnzanModelCostRow,
     EnzanModelCostTotal,
+    EnzanOptimizeResponse,
+    EnzanRecommendation,
     EnzanResource,
     EnzanSummaryResponse,
     EnzanSummaryRow,
@@ -289,6 +291,30 @@ class EnzanClient:
             )
             for alert in result.get("alerts", [])
         ]
+
+    def optimize(self, window: TimeWindow = "30d") -> EnzanOptimizeResponse:
+        """Generate cost optimization recommendations."""
+        result = self._http.post("/v1/enzan/optimize", {"window": window})
+        recs = [
+            EnzanRecommendation(
+                type=r.get("type", ""),
+                title=r.get("title", ""),
+                description=r.get("description", ""),
+                estimated_savings=r.get("estimatedSavings", 0.0),
+                confidence=r.get("confidence", 0.0),
+                suggestion=r.get("suggestion", ""),
+            )
+            for r in result.get("recommendations", [])
+        ]
+        return EnzanOptimizeResponse(
+            window=result.get("window", window),
+            start_time=result.get("startTime", ""),
+            end_time=result.get("endTime", ""),
+            efficiency_score=result.get("efficiencyScore", 100),
+            monthly_spend=result.get("monthlySpend", 0.0),
+            potential_savings=result.get("potentialSavings", 0.0),
+            recommendations=recs,
+        )
 
     def create_alert(self, alert: EnzanAlert) -> dict[str, str]:
         return self._http.post(

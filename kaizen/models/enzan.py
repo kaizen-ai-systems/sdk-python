@@ -199,3 +199,32 @@ class EnzanBurnResponse:
 
     burn_rate_usd_per_hour: float
     timestamp: str
+
+
+@dataclass
+class EnzanRecommendation:
+    """Cost optimization recommendation."""
+
+    type: str
+    title: str
+    description: str
+    estimated_savings: float
+    confidence: float
+    suggestion: str
+
+
+@dataclass
+class EnzanOptimizeResponse:
+    """Response from Enzan optimizer.
+
+    potential_savings is a heuristic upper bound; individual recommendations
+    may address overlapping spend, so actual realizable savings may be lower.
+    """
+
+    window: str
+    start_time: str
+    end_time: str
+    efficiency_score: int
+    monthly_spend: float
+    potential_savings: float
+    recommendations: list[EnzanRecommendation]

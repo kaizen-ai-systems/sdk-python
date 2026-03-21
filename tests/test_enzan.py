@@ -53,6 +53,70 @@ def test_enzan_summary_maps_api_costs_as_none_when_absent():
     assert summary.api_costs is None
 
 
+def test_enzan_optimize_maps_recommendations():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/optimize": {
+                "window": "30d",
+                "startTime": "2026-02-18T00:00:00Z",
+                "endTime": "2026-03-20T00:00:00Z",
+                "efficiencyScore": 72,
+                "monthlySpend": 12500.0,
+                "potentialSavings": 3200.0,
+                "recommendations": [
+                    {
+                        "type": "self_host_breakeven",
+                        "title": "Self-host gpt-4.1 on h100",
+                        "description": "API spend on gpt-4.1 is ~$3200.00/mo; a h100 GPU costs ~$1452.70/mo",
+                        "estimatedSavings": 1800.0,
+                        "confidence": 0.5,
+                        "suggestion": "Deploy gpt-4.1 on a aws/h100 instance",
+                    },
+                    {
+                        "type": "model_downgrade",
+                        "title": "Downgrade simple queries from gpt-4.1",
+                        "description": "80% of queries are simple lookups.",
+                        "estimatedSavings": 1400.0,
+                        "confidence": 0.8,
+                        "suggestion": "Route simple prompts to openai/gpt-4o-mini to save ~$1400.00",
+                    },
+                ],
+            }
+        }
+    )
+    client = EnzanClient(fake)
+    response = client.optimize(window="30d")
+
+    assert response.efficiency_score == 72
+    assert response.monthly_spend == 12500.0
+    assert response.potential_savings == 3200.0
+    assert len(response.recommendations) == 2
+    assert response.recommendations[0].type == "self_host_breakeven"
+    assert response.recommendations[0].estimated_savings == 1800.0
+    assert response.recommendations[1].confidence == 0.8
+
+
+def test_enzan_optimize_handles_empty_recommendations():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/optimize": {
+                "window": "30d",
+                "startTime": "2026-02-18T00:00:00Z",
+                "endTime": "2026-03-20T00:00:00Z",
+                "efficiencyScore": 95,
+                "monthlySpend": 500.0,
+                "potentialSavings": 0.0,
+                "recommendations": [],
+            }
+        }
+    )
+    client = EnzanClient(fake)
+    response = client.optimize(window="30d")
+
+    assert response.efficiency_score == 95
+    assert response.recommendations == []
+
+
 def test_enzan_costs_by_model_maps_nested_breakdowns():
     fake = FakeHttp(
         {
