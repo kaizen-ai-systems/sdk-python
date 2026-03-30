@@ -8,6 +8,7 @@ from ..models import (
     APICostSummary,
     EnzanAlert,
     EnzanBurnResponse,
+    EnzanChatResponse,
     EnzanGPUPricing,
     EnzanGPUPricingMutationResponse,
     EnzanLLMPricing,
@@ -19,6 +20,7 @@ from ..models import (
     EnzanOptimizeResponse,
     EnzanRecommendation,
     EnzanResource,
+    EnzanSuggestedAction,
     EnzanSummaryResponse,
     EnzanSummaryRow,
     EnzanSummaryTotal,
@@ -314,6 +316,38 @@ class EnzanClient:
             monthly_spend=result.get("monthlySpend", 0.0),
             potential_savings=result.get("potentialSavings", 0.0),
             recommendations=recs,
+        )
+
+    def chat(
+        self,
+        message: str,
+        conversation_id: str | None = None,
+        window: str | None = None,
+    ) -> EnzanChatResponse:
+        """Conversational AI cost Q&A with multi-turn support."""
+
+        payload: dict[str, Any] = {"message": message}
+        if conversation_id:
+            payload["conversationId"] = conversation_id
+        if window:
+            payload["window"] = window
+
+        result = self._http.post("/v1/enzan/chat", payload)
+        actions = [
+            EnzanSuggestedAction(
+                type=a.get("type", ""),
+                label=a.get("label", ""),
+                window=a.get("window"),
+                model=a.get("model"),
+            )
+            for a in result.get("suggestedActions", [])
+        ]
+        return EnzanChatResponse(
+            conversation_id=result.get("conversationId", ""),
+            message=result.get("message", ""),
+            effective_window=result.get("effectiveWindow"),
+            suggested_actions=actions,
+            supporting_data=result.get("supportingData"),
         )
 
     def create_alert(self, alert: EnzanAlert) -> dict[str, str]:

@@ -228,3 +228,26 @@ class EnzanOptimizeResponse:
     monthly_spend: float
     potential_savings: float
     recommendations: list[EnzanRecommendation]
+
+
+@dataclass
+class EnzanSuggestedAction:
+    """Typed action chip from Enzan chat."""
+
+    # set_window | view_summary | view_costs_by_model
+    # | view_optimizer | view_model_pricing | view_gpu_pricing
+    type: str
+    label: str
+    window: str | None = None
+    model: str | None = None
+
+
+@dataclass
+class EnzanChatResponse:
+    """Response from Enzan chat endpoint."""
+
+    conversation_id: str
+    message: str
+    suggested_actions: list[EnzanSuggestedAction]
+    effective_window: str | None = None
+    supporting_data: dict[str, object] | None = None
