@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 from .._types import GroupByDimension, TimeWindow
 from ..http import HttpClient
 from ..models import (
     APICostSummary,
     EnzanAlert,
+    EnzanAlertDelivery,
+    EnzanAlertEndpoint,
+    EnzanAlertEndpointMutationResponse,
+    EnzanAlertEvent,
     EnzanBurnResponse,
     EnzanChatResponse,
+    EnzanCreateAlertRequest,
     EnzanGPUPricing,
     EnzanGPUPricingMutationResponse,
     EnzanLLMPricing,
@@ -24,6 +30,7 @@ from ..models import (
     EnzanSummaryResponse,
     EnzanSummaryRow,
     EnzanSummaryTotal,
+    StatusWithIDResponse,
 )
 
 
@@ -294,6 +301,61 @@ class EnzanClient:
             for alert in result.get("alerts", [])
         ]
 
+    def list_alert_endpoints(self) -> list[EnzanAlertEndpoint]:
+        result = self._http.get("/v1/enzan/alerts/endpoints")
+        return [
+            EnzanAlertEndpoint(
+                id=endpoint.get("id", ""),
+                kind=endpoint.get("kind", "webhook"),
+                target_url=endpoint.get("targetUrl", ""),
+                has_signing_secret=endpoint.get("hasSigningSecret", False),
+                enabled=endpoint.get("enabled", True),
+                last_used_at=endpoint.get("lastUsedAt"),
+                created_at=endpoint.get("createdAt", ""),
+                updated_at=endpoint.get("updatedAt", ""),
+            )
+            for endpoint in result.get("endpoints", [])
+        ]
+
+    def list_alert_events(self, limit: int | None = None) -> list[EnzanAlertEvent]:
+        path = "/v1/enzan/alerts/events"
+        if limit is not None and limit > 0:
+            path = f"{path}?limit={limit}"
+        result = self._http.get(path)
+        return [
+            EnzanAlertEvent(
+                id=event.get("id", ""),
+                rule_id=event.get("ruleId"),
+                type=event.get("type", ""),
+                dedupe_key=event.get("dedupeKey", ""),
+                payload=event.get("payload", {}),
+                triggered_at=event.get("triggeredAt", ""),
+            )
+            for event in result.get("events", [])
+        ]
+
+    def list_alert_deliveries(self, limit: int | None = None) -> list[EnzanAlertDelivery]:
+        path = "/v1/enzan/alerts/deliveries"
+        if limit is not None and limit > 0:
+            path = f"{path}?limit={limit}"
+        result = self._http.get(path)
+        return [
+            EnzanAlertDelivery(
+                id=delivery.get("id", ""),
+                event_id=delivery.get("eventId", ""),
+                endpoint_id=delivery.get("endpointId"),
+                status=delivery.get("status", "pending"),
+                retry_count=delivery.get("retryCount", 0),
+                next_retry_at=delivery.get("nextRetryAt", ""),
+                last_attempted_at=delivery.get("lastAttemptedAt"),
+                last_response_code=delivery.get("lastResponseCode"),
+                last_error=delivery.get("lastError"),
+                created_at=delivery.get("createdAt", ""),
+                updated_at=delivery.get("updatedAt", ""),
+            )
+            for delivery in result.get("deliveries", [])
+        ]
+
     def optimize(self, window: TimeWindow = "30d") -> EnzanOptimizeResponse:
         """Generate cost optimization recommendations."""
         result = self._http.post("/v1/enzan/optimize", {"window": window})
@@ -350,16 +412,65 @@ class EnzanClient:
             supporting_data=result.get("supportingData"),
         )
 
-    def create_alert(self, alert: EnzanAlert) -> dict[str, str]:
-        return self._http.post(
-            "/v1/enzan/alerts",
-            {
-                "id": alert.id,
-                "name": alert.name,
-                "type": alert.type,
-                "threshold": alert.threshold,
-                "window": alert.window,
-                "labels": alert.labels,
-                "enabled": alert.enabled,
-            },
+    def create_alert(self, alert: EnzanCreateAlertRequest) -> StatusWithIDResponse:
+        if alert.type == "cost_threshold":
+            if alert.threshold is None:
+                raise ValueError("threshold is required for alert type cost_threshold")
+            if not alert.window.strip():
+                raise ValueError("window is required for alert type cost_threshold")
+        elif alert.type == "budget_exceeded" and alert.threshold is None:
+            raise ValueError("threshold is required for alert type budget_exceeded")
+        elif (
+            alert.type == "daily_summary"
+            and alert.window.strip()
+            and alert.window.strip() != "24h"
+        ):
+            raise ValueError("window must be 24h for alert type daily_summary")
+        payload: dict[str, Any] = {
+            "name": alert.name,
+            "type": alert.type,
+        }
+        if alert.id:
+            payload["id"] = alert.id
+        if alert.threshold is not None:
+            payload["threshold"] = alert.threshold
+        if alert.window:
+            payload["window"] = alert.window
+        if alert.labels is not None:
+            payload["labels"] = alert.labels
+        if alert.enabled is not None:
+            payload["enabled"] = alert.enabled
+        result = self._http.post("/v1/enzan/alerts", payload)
+        return StatusWithIDResponse(
+            status=result.get("status", "created"),
+            id=result.get("id", ""),
         )
+
+    def create_alert_endpoint(
+        self,
+        *,
+        target_url: str,
+        signing_secret: str | None = None,
+    ) -> EnzanAlertEndpointMutationResponse:
+        payload: dict[str, Any] = {"targetUrl": target_url}
+        if signing_secret is not None:
+            payload["signingSecret"] = signing_secret
+        result = self._http.post("/v1/enzan/alerts/endpoints", payload)
+        endpoint = result.get("endpoint", {})
+        return EnzanAlertEndpointMutationResponse(
+            status=result.get("status", "created"),
+            endpoint=EnzanAlertEndpoint(
+                id=endpoint.get("id", ""),
+                kind=endpoint.get("kind", "webhook"),
+                target_url=endpoint.get("targetUrl", ""),
+                has_signing_secret=endpoint.get("hasSigningSecret", False),
+                enabled=endpoint.get("enabled", True),
+                last_used_at=endpoint.get("lastUsedAt"),
+                created_at=endpoint.get("createdAt", ""),
+                updated_at=endpoint.get("updatedAt", ""),
+            ),
+        )
+
+    def delete_alert_endpoint(self, endpoint_id: str) -> dict[str, str]:
+        path = f"/v1/enzan/alerts/endpoints/{quote(endpoint_id, safe='')}"
+        return self._http.request("DELETE", path)

@@ -1,9 +1,13 @@
+from kaizen.models import EnzanCreateAlertRequest
 from kaizen.services.enzan import EnzanClient
 
 
 class FakeHttp:
     def __init__(self, responses):
         self.responses = responses
+
+    def get(self, path):
+        return self.responses[path]
 
     def post(self, path, data):
         return self.responses[path]
@@ -162,3 +166,128 @@ def test_enzan_costs_by_model_maps_nested_breakdowns():
     assert response.rows[0].model == "gpt-4o-mini"
     assert response.rows[0].categories is not None
     assert response.rows[0].categories[0].category == "simple"
+
+
+def test_enzan_alert_history_lists_events_and_deliveries():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/alerts/events?limit=25": {
+                "events": [
+                    {
+                        "id": "event-1",
+                        "ruleId": "rule-1",
+                        "type": "cost_threshold",
+                        "dedupeKey": "cost_threshold:rule-1:2026-04-04",
+                        "payload": {"threshold": 10, "spend": 12.5},
+                        "triggeredAt": "2026-04-04T12:00:00Z",
+                    }
+                ]
+            },
+            "/v1/enzan/alerts/deliveries?limit=10": {
+                "deliveries": [
+                    {
+                        "id": "delivery-1",
+                        "eventId": "event-1",
+                        "endpointId": "endpoint-1",
+                        "status": "sent",
+                        "retryCount": 1,
+                        "nextRetryAt": "2026-04-04T12:05:00Z",
+                        "lastAttemptedAt": "2026-04-04T12:00:30Z",
+                        "lastResponseCode": 202,
+                        "createdAt": "2026-04-04T12:00:00Z",
+                        "updatedAt": "2026-04-04T12:00:30Z",
+                    }
+                ]
+            },
+        }
+    )
+    client = EnzanClient(fake)
+
+    events = client.list_alert_events(limit=25)
+    deliveries = client.list_alert_deliveries(limit=10)
+
+    assert events[0].rule_id == "rule-1"
+    assert events[0].payload["threshold"] == 10
+    assert deliveries[0].endpoint_id == "endpoint-1"
+    assert deliveries[0].last_response_code == 202
+
+
+def test_enzan_create_alert_returns_typed_response():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/alerts": {
+                "status": "created",
+                "id": "alert-1",
+            }
+        }
+    )
+    client = EnzanClient(fake)
+
+    response = client.create_alert(
+        EnzanCreateAlertRequest(
+            name="High spend",
+            type="cost_threshold",
+            threshold=100.0,
+            window="24h",
+        )
+    )
+
+    assert response.status == "created"
+    assert response.id == "alert-1"
+
+
+def test_enzan_create_alert_requires_window_for_cost_threshold():
+    fake = FakeHttp({})
+    client = EnzanClient(fake)
+
+    try:
+        client.create_alert(
+            EnzanCreateAlertRequest(
+                name="High spend",
+                type="cost_threshold",
+                threshold=100.0,
+            )
+        )
+    except ValueError as err:
+        assert "window is required" in str(err)
+    else:
+        raise AssertionError("expected ValueError for missing window")
+
+
+def test_enzan_create_alert_allows_daily_summary_without_window():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/alerts": {
+                "status": "created",
+                "id": "alert-daily",
+            }
+        }
+    )
+    client = EnzanClient(fake)
+
+    response = client.create_alert(
+        EnzanCreateAlertRequest(
+            name="Daily summary",
+            type="daily_summary",
+        )
+    )
+
+    assert response.id == "alert-daily"
+
+
+def test_enzan_create_alert_rejects_non_24h_daily_summary_window():
+    fake = FakeHttp({})
+    client = EnzanClient(fake)
+
+    try:
+        client.create_alert(
+            EnzanCreateAlertRequest(
+                name="Daily summary",
+                type="daily_summary",
+                window="7d",
+            )
+        )
+    except ValueError as err:
+        assert "window must be 24h" in str(err)
+    else:
+        raise AssertionError("expected ValueError for invalid daily_summary window")

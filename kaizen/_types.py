@@ -17,5 +17,15 @@ AlertType = Literal[
     "usage_spike",
     "idle_resource",
     "budget_exceeded",
+    "optimization_available",
+    "pricing_change",
+    "daily_summary",
+]
+CreatableAlertType = Literal[
+    "cost_threshold",
+    "budget_exceeded",
+    "optimization_available",
+    "pricing_change",
+    "daily_summary",
 ]
 CorrelationType = Literal["positive", "negative"]

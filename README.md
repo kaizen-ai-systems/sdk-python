@@ -105,7 +105,7 @@ akuma.delete_source(sources[0].id)
 ## Enzan (GPU Cost)
 
 ```python
-from kaizen import enzan, EnzanResource, EnzanAlert
+from kaizen import enzan, EnzanCreateAlertRequest, EnzanResource
 
 # Get cost summary
 summary = enzan.summary(
@@ -140,12 +140,18 @@ enzan.register_resource(EnzanResource(
 ))
 
 # Create alert
-enzan.create_alert(EnzanAlert(
+enzan.create_alert(EnzanCreateAlertRequest(
     id="alert-001",
     name="High spend",
     type="cost_threshold",
     threshold=1000,
-    window="24h"
+    window="24h"  # required for cost_threshold
+))
+
+# daily_summary is a fixed one-day UTC summary; omit window or pass "24h"
+enzan.create_alert(EnzanCreateAlertRequest(
+    name="Daily summary",
+    type="daily_summary",
 ))
 ```
 

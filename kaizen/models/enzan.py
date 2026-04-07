@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
-from .._types import AlertType
+from .._types import AlertType, CreatableAlertType
 
 
 @dataclass
@@ -191,6 +192,83 @@ class EnzanAlert:
     window: str
     labels: dict[str, str] | None = None
     enabled: bool = True
+
+
+@dataclass
+class EnzanCreateAlertRequest:
+    """Request for creating an Enzan alert.
+
+    ``window`` is required when ``type == "cost_threshold"``, defaults to
+    ``30d`` for ``optimization_available``, must be omitted or set to
+    ``24h`` for ``daily_summary``, and is ignored for ``pricing_change``.
+    """
+
+    name: str
+    type: CreatableAlertType
+    id: str = ""
+    threshold: float | None = None
+    window: str = ""
+    labels: dict[str, str] | None = None
+    enabled: bool | None = None
+
+
+@dataclass
+class StatusWithIDResponse:
+    """Generic mutation response with created/deleted resource ID."""
+
+    status: str
+    id: str
+
+
+@dataclass
+class EnzanAlertEndpoint:
+    """Webhook delivery endpoint for Enzan alerts."""
+
+    id: str
+    kind: str
+    target_url: str
+    has_signing_secret: bool
+    enabled: bool
+    last_used_at: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass
+class EnzanAlertEndpointMutationResponse:
+    """Response from creating an Enzan alert endpoint."""
+
+    status: str
+    endpoint: EnzanAlertEndpoint
+
+
+@dataclass
+class EnzanAlertEvent:
+    """One fired Enzan alert event."""
+
+    id: str
+    type: str
+    dedupe_key: str
+    payload: dict[str, Any]
+    triggered_at: str
+    rule_id: str | None = None
+
+
+@dataclass
+class EnzanAlertDelivery:
+    """One Enzan alert delivery status row."""
+
+    id: str
+    event_id: str
+    status: str
+    retry_count: int
+    next_retry_at: str
+    created_at: str
+    updated_at: str
+    endpoint_id: str | None = None
+    last_attempted_at: str | None = None
+    last_response_code: int | None = None
+    last_error: str | None = None
 
 
 @dataclass
