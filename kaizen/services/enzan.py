@@ -11,7 +11,9 @@ from ..models import (
     EnzanAlertDelivery,
     EnzanAlertEndpoint,
     EnzanAlertEndpointMutationResponse,
+    EnzanAlertEndpointUpdateRequest,
     EnzanAlertEvent,
+    EnzanAlertMutationResponse,
     EnzanBurnResponse,
     EnzanChatResponse,
     EnzanCreateAlertRequest,
@@ -30,6 +32,7 @@ from ..models import (
     EnzanSummaryResponse,
     EnzanSummaryRow,
     EnzanSummaryTotal,
+    EnzanUpdateAlertRequest,
     StatusWithIDResponse,
 )
 
@@ -446,6 +449,42 @@ class EnzanClient:
             id=result.get("id", ""),
         )
 
+    def update_alert(
+        self,
+        alert_id: str,
+        alert: EnzanUpdateAlertRequest,
+    ) -> EnzanAlertMutationResponse:
+        payload: dict[str, Any] = {}
+        if alert.name is not None:
+            payload["name"] = alert.name
+        if alert.threshold is not None:
+            payload["threshold"] = alert.threshold
+        if alert.window is not None:
+            payload["window"] = alert.window
+        if alert.labels is not None:
+            payload["labels"] = alert.labels
+        if alert.enabled is not None:
+            payload["enabled"] = alert.enabled
+        path = f"/v1/enzan/alerts/{quote(alert_id, safe='')}"
+        result = self._http.request("PATCH", path, payload)
+        raw_alert = result.get("alert", {})
+        return EnzanAlertMutationResponse(
+            status=result.get("status", "updated"),
+            alert=EnzanAlert(
+                id=raw_alert.get("id", ""),
+                name=raw_alert.get("name", ""),
+                type=raw_alert.get("type", "cost_threshold"),
+                threshold=raw_alert.get("threshold", 0.0),
+                window=raw_alert.get("window", ""),
+                labels=raw_alert.get("labels"),
+                enabled=raw_alert.get("enabled", True),
+            ),
+        )
+
+    def delete_alert(self, alert_id: str) -> dict[str, str]:
+        path = f"/v1/enzan/alerts/{quote(alert_id, safe='')}"
+        return self._http.request("DELETE", path)
+
     def create_alert_endpoint(
         self,
         *,
@@ -459,6 +498,35 @@ class EnzanClient:
         endpoint = result.get("endpoint", {})
         return EnzanAlertEndpointMutationResponse(
             status=result.get("status", "created"),
+            endpoint=EnzanAlertEndpoint(
+                id=endpoint.get("id", ""),
+                kind=endpoint.get("kind", "webhook"),
+                target_url=endpoint.get("targetUrl", ""),
+                has_signing_secret=endpoint.get("hasSigningSecret", False),
+                enabled=endpoint.get("enabled", True),
+                last_used_at=endpoint.get("lastUsedAt"),
+                created_at=endpoint.get("createdAt", ""),
+                updated_at=endpoint.get("updatedAt", ""),
+            ),
+        )
+
+    def update_alert_endpoint(
+        self,
+        endpoint_id: str,
+        req: EnzanAlertEndpointUpdateRequest,
+    ) -> EnzanAlertEndpointMutationResponse:
+        payload: dict[str, Any] = {}
+        if req.target_url is not None:
+            payload["targetUrl"] = req.target_url
+        if req.signing_secret is not None:
+            payload["signingSecret"] = req.signing_secret
+        if req.enabled is not None:
+            payload["enabled"] = req.enabled
+        path = f"/v1/enzan/alerts/endpoints/{quote(endpoint_id, safe='')}"
+        result = self._http.request("PATCH", path, payload)
+        endpoint = result.get("endpoint", {})
+        return EnzanAlertEndpointMutationResponse(
+            status=result.get("status", "updated"),
             endpoint=EnzanAlertEndpoint(
                 id=endpoint.get("id", ""),
                 kind=endpoint.get("kind", "webhook"),

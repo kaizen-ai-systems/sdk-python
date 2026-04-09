@@ -1,16 +1,27 @@
-from kaizen.models import EnzanCreateAlertRequest
+from kaizen.models import (
+    EnzanAlertEndpointUpdateRequest,
+    EnzanCreateAlertRequest,
+    EnzanUpdateAlertRequest,
+)
 from kaizen.services.enzan import EnzanClient
 
 
 class FakeHttp:
     def __init__(self, responses):
         self.responses = responses
+        self.calls = []
 
     def get(self, path):
+        self.calls.append(("GET", path, None))
         return self.responses[path]
 
     def post(self, path, data):
+        self.calls.append(("POST", path, data))
         return self.responses[path]
+
+    def request(self, method, path, data=None):
+        self.calls.append((method, path, data))
+        return self.responses[(method, path)]
 
 
 def test_enzan_summary_maps_api_costs_when_present():
@@ -273,6 +284,14 @@ def test_enzan_create_alert_allows_daily_summary_without_window():
     )
 
     assert response.id == "alert-daily"
+    assert fake.calls[-1] == (
+        "POST",
+        "/v1/enzan/alerts",
+        {
+            "name": "Daily summary",
+            "type": "daily_summary",
+        },
+    )
 
 
 def test_enzan_create_alert_rejects_non_24h_daily_summary_window():
@@ -291,3 +310,156 @@ def test_enzan_create_alert_rejects_non_24h_daily_summary_window():
         assert "window must be 24h" in str(err)
     else:
         raise AssertionError("expected ValueError for invalid daily_summary window")
+
+
+def test_enzan_update_and_delete_alert():
+    fake = FakeHttp(
+        {
+            (
+                "PATCH",
+                "/v1/enzan/alerts/alert-1",
+            ): {
+                "status": "updated",
+                "alert": {
+                    "id": "alert-1",
+                    "name": "Updated alert",
+                    "type": "cost_threshold",
+                    "threshold": 20.0,
+                    "window": "7d",
+                    "labels": {"team": "finance"},
+                    "enabled": False,
+                },
+            },
+            (
+                "DELETE",
+                "/v1/enzan/alerts/alert-1",
+            ): {
+                "status": "deleted",
+                "id": "alert-1",
+            },
+        }
+    )
+    client = EnzanClient(fake)
+
+    updated = client.update_alert(
+        "alert-1",
+        EnzanUpdateAlertRequest(enabled=False, window="7d"),
+    )
+    deleted = client.delete_alert("alert-1")
+
+    assert updated.status == "updated"
+    assert updated.alert.enabled is False
+    assert updated.alert.window == "7d"
+    assert deleted["status"] == "deleted"
+    assert deleted["id"] == "alert-1"
+    assert fake.calls[0] == (
+        "PATCH",
+        "/v1/enzan/alerts/alert-1",
+        {"enabled": False, "window": "7d"},
+    )
+
+
+def test_enzan_update_alert_allows_empty_window_reset():
+    fake = FakeHttp(
+        {
+            (
+                "PATCH",
+                "/v1/enzan/alerts/alert-1",
+            ): {
+                "status": "updated",
+                "alert": {
+                    "id": "alert-1",
+                    "name": "Optimizer",
+                    "type": "optimization_available",
+                    "threshold": 0.0,
+                    "window": "30d",
+                    "enabled": True,
+                },
+            }
+        }
+    )
+    client = EnzanClient(fake)
+
+    updated = client.update_alert("alert-1", EnzanUpdateAlertRequest(window=""))
+
+    assert updated.status == "updated"
+    assert updated.alert.window == "30d"
+    assert fake.calls[0] == (
+        "PATCH",
+        "/v1/enzan/alerts/alert-1",
+        {"window": ""},
+    )
+
+
+def test_enzan_update_alert_endpoint():
+    fake = FakeHttp(
+        {
+            (
+                "PATCH",
+                "/v1/enzan/alerts/endpoints/endpoint-1",
+            ): {
+                "status": "updated",
+                "endpoint": {
+                    "id": "endpoint-1",
+                    "kind": "webhook",
+                    "targetUrl": "https://hooks.example.com/new",
+                    "hasSigningSecret": True,
+                    "enabled": False,
+                    "createdAt": "2026-04-08T00:00:00Z",
+                    "updatedAt": "2026-04-08T00:05:00Z",
+                },
+            }
+        }
+    )
+    client = EnzanClient(fake)
+
+    updated = client.update_alert_endpoint(
+        "endpoint-1",
+        EnzanAlertEndpointUpdateRequest(enabled=False),
+    )
+
+    assert updated.status == "updated"
+    assert updated.endpoint.id == "endpoint-1"
+    assert updated.endpoint.enabled is False
+    assert updated.endpoint.has_signing_secret is True
+    assert fake.calls[0] == (
+        "PATCH",
+        "/v1/enzan/alerts/endpoints/endpoint-1",
+        {"enabled": False},
+    )
+
+
+def test_enzan_update_alert_endpoint_allows_empty_signing_secret_to_clear():
+    fake = FakeHttp(
+        {
+            (
+                "PATCH",
+                "/v1/enzan/alerts/endpoints/endpoint-1",
+            ): {
+                "status": "updated",
+                "endpoint": {
+                    "id": "endpoint-1",
+                    "kind": "webhook",
+                    "targetUrl": "https://hooks.example.com/new",
+                    "hasSigningSecret": False,
+                    "enabled": True,
+                    "createdAt": "2026-04-08T00:00:00Z",
+                    "updatedAt": "2026-04-08T00:05:00Z",
+                },
+            }
+        }
+    )
+    client = EnzanClient(fake)
+
+    updated = client.update_alert_endpoint(
+        "endpoint-1",
+        EnzanAlertEndpointUpdateRequest(signing_secret=""),
+    )
+
+    assert updated.status == "updated"
+    assert updated.endpoint.has_signing_secret is False
+    assert fake.calls[0] == (
+        "PATCH",
+        "/v1/enzan/alerts/endpoints/endpoint-1",
+        {"signingSecret": ""},
+    )

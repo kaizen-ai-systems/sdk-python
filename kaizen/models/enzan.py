@@ -213,11 +213,30 @@ class EnzanCreateAlertRequest:
 
 
 @dataclass
+class EnzanUpdateAlertRequest:
+    """Request for updating an Enzan alert."""
+
+    name: str | None = None
+    threshold: float | None = None
+    window: str | None = None
+    labels: dict[str, str] | None = None
+    enabled: bool | None = None
+
+
+@dataclass
 class StatusWithIDResponse:
     """Generic mutation response with created/deleted resource ID."""
 
     status: str
     id: str
+
+
+@dataclass
+class EnzanAlertMutationResponse:
+    """Response from updating an Enzan alert."""
+
+    status: str
+    alert: EnzanAlert
 
 
 @dataclass
@@ -240,6 +259,15 @@ class EnzanAlertEndpointMutationResponse:
 
     status: str
     endpoint: EnzanAlertEndpoint
+
+
+@dataclass
+class EnzanAlertEndpointUpdateRequest:
+    """Request for updating an Enzan alert endpoint."""
+
+    target_url: str | None = None
+    signing_secret: str | None = None
+    enabled: bool | None = None
 
 
 @dataclass
