@@ -23,6 +23,7 @@ AlertType = Literal[
 ]
 CreatableAlertType = Literal[
     "cost_threshold",
+    "cost_anomaly",
     "budget_exceeded",
     "optimization_available",
     "pricing_change",

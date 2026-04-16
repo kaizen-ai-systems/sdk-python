@@ -265,6 +265,77 @@ def test_enzan_create_alert_requires_window_for_cost_threshold():
         raise AssertionError("expected ValueError for missing window")
 
 
+def test_enzan_create_alert_supports_cost_anomaly():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/alerts": {
+                "status": "created",
+                "id": "alert-anomaly",
+            }
+        }
+    )
+    client = EnzanClient(fake)
+
+    response = client.create_alert(
+            EnzanCreateAlertRequest(
+                name="Spend anomaly",
+                type="cost_anomaly",
+                threshold=1.1,
+                window="7d",
+            )
+        )
+
+    assert response.id == "alert-anomaly"
+    assert fake.calls[-1] == (
+        "POST",
+        "/v1/enzan/alerts",
+        {
+            "name": "Spend anomaly",
+            "type": "cost_anomaly",
+            "threshold": 1.1,
+            "window": "7d",
+        },
+    )
+
+
+def test_enzan_create_alert_rejects_one_hour_cost_anomaly_window():
+    fake = FakeHttp({})
+    client = EnzanClient(fake)
+
+    try:
+        client.create_alert(
+            EnzanCreateAlertRequest(
+                name="Spend anomaly",
+                type="cost_anomaly",
+                threshold=50.0,
+                window="1h",
+            )
+        )
+    except ValueError as err:
+        assert "24h, 7d, or 30d" in str(err)
+    else:
+        raise AssertionError("expected ValueError for invalid cost_anomaly window")
+
+
+def test_enzan_create_alert_rejects_zero_cost_anomaly_threshold():
+    fake = FakeHttp({})
+    client = EnzanClient(fake)
+
+    try:
+        client.create_alert(
+            EnzanCreateAlertRequest(
+                name="Spend anomaly",
+                type="cost_anomaly",
+                threshold=0.0,
+                window="7d",
+            )
+        )
+    except ValueError as err:
+        assert "greater than 0" in str(err)
+    else:
+        raise AssertionError("expected ValueError for invalid cost_anomaly threshold")
+
+
 def test_enzan_create_alert_allows_daily_summary_without_window():
     fake = FakeHttp(
         {
@@ -357,6 +428,37 @@ def test_enzan_update_and_delete_alert():
         "/v1/enzan/alerts/alert-1",
         {"enabled": False, "window": "7d"},
     )
+
+
+def test_enzan_update_alert_preserves_runtime_state_fields():
+    fake = FakeHttp(
+        {
+            (
+                "PATCH",
+                "/v1/enzan/alerts/alert-1",
+            ): {
+                "status": "updated",
+                "alert": {
+                    "id": "alert-1",
+                    "name": "Spend anomaly",
+                    "type": "cost_anomaly",
+                    "threshold": 50.0,
+                    "window": "7d",
+                    "enabled": True,
+                    "evaluationState": "warming_up",
+                    "nextEligibleAt": "2026-04-20T00:00:00Z",
+                    "statusReason": "coverage_warmup",
+                },
+            },
+        }
+    )
+    client = EnzanClient(fake)
+
+    updated = client.update_alert("alert-1", EnzanUpdateAlertRequest(enabled=True))
+
+    assert updated.alert.evaluation_state == "warming_up"
+    assert updated.alert.next_eligible_at == "2026-04-20T00:00:00Z"
+    assert updated.alert.status_reason == "coverage_warmup"
 
 
 def test_enzan_update_alert_allows_empty_window_reset():

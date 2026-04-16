@@ -192,15 +192,21 @@ class EnzanAlert:
     window: str
     labels: dict[str, str] | None = None
     enabled: bool = True
+    evaluation_state: str | None = None
+    next_eligible_at: str | None = None
+    status_reason: str | None = None
 
 
 @dataclass
 class EnzanCreateAlertRequest:
     """Request for creating an Enzan alert.
 
-    ``window`` is required when ``type == "cost_threshold"``, defaults to
-    ``30d`` for ``optimization_available``, must be omitted or set to
-    ``24h`` for ``daily_summary``, and is ignored for ``pricing_change``.
+    ``threshold`` is required for ``cost_threshold``, ``cost_anomaly``, and
+    ``budget_exceeded``. ``window`` is required for ``cost_threshold`` and
+    ``cost_anomaly`` (with ``cost_anomaly`` limited to ``24h``, ``7d``, or
+    ``30d``), defaults to ``30d`` for ``optimization_available``, must be
+    omitted or set to ``24h`` for ``daily_summary``, and is ignored for
+    ``pricing_change``.
     """
 
     name: str

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import quote
 
@@ -300,6 +301,9 @@ class EnzanClient:
                 window=alert["window"],
                 labels=alert.get("labels"),
                 enabled=alert.get("enabled", True),
+                evaluation_state=alert.get("evaluationState"),
+                next_eligible_at=alert.get("nextEligibleAt"),
+                status_reason=alert.get("statusReason"),
             )
             for alert in result.get("alerts", [])
         ]
@@ -421,6 +425,32 @@ class EnzanClient:
                 raise ValueError("threshold is required for alert type cost_threshold")
             if not alert.window.strip():
                 raise ValueError("window is required for alert type cost_threshold")
+        elif alert.type == "cost_anomaly":
+            if alert.threshold is None:
+                raise ValueError("threshold is required for alert type cost_anomaly")
+            try:
+                threshold_decimal = Decimal(str(alert.threshold))
+            except InvalidOperation as exc:
+                raise ValueError(
+                    "threshold must be a valid decimal for alert type cost_anomaly"
+                ) from exc
+            if not threshold_decimal.is_finite():
+                raise ValueError("threshold must be a valid decimal for alert type cost_anomaly")
+            if threshold_decimal <= 0:
+                raise ValueError("threshold must be greater than 0 for alert type cost_anomaly")
+            if threshold_decimal > Decimal("10000"):
+                raise ValueError(
+                    "threshold must be less than or equal to 10000 for alert type cost_anomaly"
+                )
+            exponent = threshold_decimal.as_tuple().exponent
+            if isinstance(exponent, int) and exponent < -2:
+                raise ValueError(
+                    "threshold must use at most two decimal places for alert type cost_anomaly"
+                )
+            if not alert.window.strip():
+                raise ValueError("window is required for alert type cost_anomaly")
+            if alert.window.strip() == "1h":
+                raise ValueError("window must be 24h, 7d, or 30d for alert type cost_anomaly")
         elif alert.type == "budget_exceeded" and alert.threshold is None:
             raise ValueError("threshold is required for alert type budget_exceeded")
         elif (
@@ -478,6 +508,9 @@ class EnzanClient:
                 window=raw_alert.get("window", ""),
                 labels=raw_alert.get("labels"),
                 enabled=raw_alert.get("enabled", True),
+                evaluation_state=raw_alert.get("evaluationState"),
+                next_eligible_at=raw_alert.get("nextEligibleAt"),
+                status_reason=raw_alert.get("statusReason"),
             ),
         )
 
