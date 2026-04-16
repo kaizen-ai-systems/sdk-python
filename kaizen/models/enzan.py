@@ -125,6 +125,57 @@ class EnzanModelCostResponse:
 
 
 @dataclass
+class EnzanRoutingConfig:
+    """Smart-routing config for one user."""
+
+    enabled: bool
+    provider: str
+    default_model: str
+    simple_model: str | None = None
+    moderate_model: str | None = None
+    complex_model: str | None = None
+    updated_at: str | None = None
+
+
+@dataclass
+class EnzanRoutingConfigMutationResponse:
+    """Response from a smart-routing upsert."""
+
+    status: str
+    routing: EnzanRoutingConfig
+
+
+@dataclass
+class EnzanRoutingSavingsBreakdown:
+    """Savings bucket for one routed prompt category/model pair."""
+
+    prompt_category: str
+    original_model: str
+    routed_model: str
+    queries: int
+    actual_cost_usd: float
+    counterfactual_cost_usd: float
+    estimated_savings_usd: float
+
+
+@dataclass
+class EnzanRoutingSavingsResponse:
+    """Aggregated realized smart-routing savings."""
+
+    window: str
+    start_time: str
+    end_time: str
+    provider: str
+    default_model: str
+    total_queries: int
+    routed_queries: int
+    actual_cost_usd: float
+    counterfactual_cost_usd: float
+    estimated_savings_usd: float
+    breakdown: list[EnzanRoutingSavingsBreakdown]
+
+
+@dataclass
 class EnzanLLMPricing:
     """LLM pricing catalog row."""
 

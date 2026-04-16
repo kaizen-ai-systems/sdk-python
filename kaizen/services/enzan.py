@@ -29,6 +29,10 @@ from ..models import (
     EnzanOptimizeResponse,
     EnzanRecommendation,
     EnzanResource,
+    EnzanRoutingConfig,
+    EnzanRoutingConfigMutationResponse,
+    EnzanRoutingSavingsBreakdown,
+    EnzanRoutingSavingsResponse,
     EnzanSuggestedAction,
     EnzanSummaryResponse,
     EnzanSummaryRow,
@@ -307,6 +311,82 @@ class EnzanClient:
             )
             for alert in result.get("alerts", [])
         ]
+
+    def routing(self) -> EnzanRoutingConfig:
+        result = self._http.get("/v1/enzan/routing")
+        routing = result.get("routing", {})
+        return EnzanRoutingConfig(
+            enabled=routing.get("enabled", False),
+            provider=routing.get("provider", ""),
+            default_model=routing.get("default_model", ""),
+            simple_model=routing.get("simple_model"),
+            moderate_model=routing.get("moderate_model"),
+            complex_model=routing.get("complex_model"),
+            updated_at=routing.get("updated_at"),
+        )
+
+    def set_routing(
+        self,
+        *,
+        enabled: bool,
+        simple_model: str | None = None,
+        moderate_model: str | None = None,
+        complex_model: str | None = None,
+    ) -> EnzanRoutingConfigMutationResponse:
+        payload: dict[str, Any] = {"enabled": enabled}
+        if simple_model is not None:
+            payload["simple_model"] = simple_model
+        if moderate_model is not None:
+            payload["moderate_model"] = moderate_model
+        if complex_model is not None:
+            payload["complex_model"] = complex_model
+        result = self._http.post("/v1/enzan/routing", payload)
+        routing = result.get("routing", {})
+        return EnzanRoutingConfigMutationResponse(
+            status=result.get("status", "upserted"),
+            routing=EnzanRoutingConfig(
+                enabled=routing.get("enabled", False),
+                provider=routing.get("provider", ""),
+                default_model=routing.get("default_model", ""),
+                simple_model=routing.get("simple_model"),
+                moderate_model=routing.get("moderate_model"),
+                complex_model=routing.get("complex_model"),
+                updated_at=routing.get("updated_at"),
+            ),
+        )
+
+    def routing_savings(self, window: TimeWindow = "30d") -> EnzanRoutingSavingsResponse:
+        path = (
+            f"/v1/enzan/routing/savings?window={window}"
+            if window
+            else "/v1/enzan/routing/savings"
+        )
+        result = self._http.get(path)
+        breakdown = [
+            EnzanRoutingSavingsBreakdown(
+                prompt_category=row.get("prompt_category", ""),
+                original_model=row.get("original_model", ""),
+                routed_model=row.get("routed_model", ""),
+                queries=row.get("queries", 0),
+                actual_cost_usd=row.get("actual_cost_usd", 0.0),
+                counterfactual_cost_usd=row.get("counterfactual_cost_usd", 0.0),
+                estimated_savings_usd=row.get("estimated_savings_usd", 0.0),
+            )
+            for row in result.get("breakdown", [])
+        ]
+        return EnzanRoutingSavingsResponse(
+            window=result.get("window", window),
+            start_time=result.get("start_time", ""),
+            end_time=result.get("end_time", ""),
+            provider=result.get("provider", ""),
+            default_model=result.get("default_model", ""),
+            total_queries=result.get("total_queries", 0),
+            routed_queries=result.get("routed_queries", 0),
+            actual_cost_usd=result.get("actual_cost_usd", 0.0),
+            counterfactual_cost_usd=result.get("counterfactual_cost_usd", 0.0),
+            estimated_savings_usd=result.get("estimated_savings_usd", 0.0),
+            breakdown=breakdown,
+        )
 
     def list_alert_endpoints(self) -> list[EnzanAlertEndpoint]:
         result = self._http.get("/v1/enzan/alerts/endpoints")

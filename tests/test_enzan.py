@@ -179,6 +179,74 @@ def test_enzan_costs_by_model_maps_nested_breakdowns():
     assert response.rows[0].categories[0].category == "simple"
 
 
+def test_enzan_routing_maps_config_and_savings():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/routing": {
+                "routing": {
+                    "enabled": True,
+                    "provider": "openai",
+                    "default_model": "gpt-4.1",
+                    "simple_model": "gpt-4o-mini",
+                    "updated_at": "2026-04-16T12:00:00Z",
+                }
+            },
+            "/v1/enzan/routing/savings?window=7d": {
+                "window": "7d",
+                "start_time": "2026-04-09T00:00:00Z",
+                "end_time": "2026-04-16T00:00:00Z",
+                "provider": "openai",
+                "default_model": "gpt-4.1",
+                "total_queries": 12,
+                "routed_queries": 8,
+                "actual_cost_usd": 1.2,
+                "counterfactual_cost_usd": 2.4,
+                "estimated_savings_usd": 1.2,
+                "breakdown": [
+                    {
+                        "prompt_category": "simple",
+                        "original_model": "gpt-4.1",
+                        "routed_model": "gpt-4o-mini",
+                        "queries": 8,
+                        "actual_cost_usd": 1.2,
+                        "counterfactual_cost_usd": 2.4,
+                        "estimated_savings_usd": 1.2,
+                    }
+                ],
+            },
+        }
+    )
+    fake.responses["/v1/enzan/routing"] = {
+        "status": "upserted",
+        "routing": {
+            "enabled": True,
+            "provider": "openai",
+            "default_model": "gpt-4.1",
+            "simple_model": "gpt-4o-mini",
+        },
+    }
+    client = EnzanClient(fake)
+
+    mutation = client.set_routing(enabled=True, simple_model="gpt-4o-mini")
+    fake.responses["/v1/enzan/routing"] = {
+        "routing": {
+            "enabled": True,
+            "provider": "openai",
+            "default_model": "gpt-4.1",
+            "simple_model": "gpt-4o-mini",
+            "updated_at": "2026-04-16T12:00:00Z",
+        }
+    }
+    routing = client.routing()
+    savings = client.routing_savings(window="7d")
+
+    assert mutation.status == "upserted"
+    assert routing.default_model == "gpt-4.1"
+    assert routing.simple_model == "gpt-4o-mini"
+    assert savings.routed_queries == 8
+    assert savings.breakdown[0].prompt_category == "simple"
+
+
 def test_enzan_alert_history_lists_events_and_deliveries():
     fake = FakeHttp(
         {
