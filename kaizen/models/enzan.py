@@ -217,6 +217,152 @@ class EnzanGPUPricingMutationResponse:
 
 
 @dataclass
+class EnzanPricingRefreshTriggerResponse:
+    """Response from POST /v1/enzan/pricing/refresh.
+
+    status is "queued" (HTTP 202) or "dropped" (HTTP 429, concurrency cap).
+    """
+
+    status: str
+    triggered_by: str
+
+
+@dataclass
+class EnzanPricingRefreshLogEntry:
+    """One enzan_pricing_refresh_log row."""
+
+    id: str
+    kind: str
+    status: str
+    rows_upserted: int
+    rows_skipped: int
+    started_at: str
+    source_id: str | None = None
+    source_name: str | None = None
+    triggered_by: str | None = None
+    duration_ms: int | None = None
+    error: str | None = None
+    finished_at: str | None = None
+
+
+@dataclass
+class EnzanPricingProvider:
+    """Registered pricing source row (admin view)."""
+
+    id: str
+    name: str
+    kind: str
+    enabled: bool
+    refresh_interval_hours: int
+    has_adapter: bool
+    last_success_at: str | None = None
+    last_failure_at: str | None = None
+    last_error: str | None = None
+
+
+@dataclass
+class EnzanGPUOfferUpsertPayload:
+    """Manual GPU offer upsert payload."""
+
+    provider: str
+    gpu_type: str
+    display_name: str
+    hourly_rate_usd: float
+    region: str | None = None
+    deployment_class: str | None = None
+    commitment_term: str | None = None
+    cluster_size_min: int | None = None
+    cluster_size_max: int | None = None
+    interconnect_class: str | None = None
+    training_ready: bool | None = None
+    currency: str | None = None
+    currency_fx_note: str | None = None
+    source_url: str | None = None
+
+
+@dataclass
+class EnzanLLMOfferUpsertPayload:
+    """Manual LLM offer upsert payload."""
+
+    provider: str
+    model: str
+    display_name: str
+    input_cost_per_1k_tokens_usd: float
+    output_cost_per_1k_tokens_usd: float
+    region: str | None = None
+    commitment_term: str | None = None
+    currency: str | None = None
+    currency_fx_note: str | None = None
+    source_url: str | None = None
+
+
+@dataclass
+class EnzanGPUOffer:
+    """Persisted GPU offer (admin or adapter-sourced)."""
+
+    id: str
+    provider: str
+    gpu_type: str
+    display_name: str
+    deployment_class: str
+    cluster_size_min: int
+    interconnect_class: str
+    training_ready: bool
+    hourly_rate_usd: float
+    currency: str
+    source_type: str
+    trust_status: str
+    fetched_at: str
+    first_seen_at: str
+    last_seen_at: str
+    active: bool
+    region: str | None = None
+    commitment_term: str | None = None
+    cluster_size_max: int | None = None
+    currency_fx_note: str | None = None
+    source_id: str | None = None
+    source_url: str | None = None
+    source_fingerprint: str | None = None
+
+
+@dataclass
+class EnzanLLMOffer:
+    """Persisted LLM offer (admin or adapter-sourced)."""
+
+    id: str
+    provider: str
+    model: str
+    display_name: str
+    input_cost_per_1k_tokens_usd: float
+    output_cost_per_1k_tokens_usd: float
+    currency: str
+    source_type: str
+    trust_status: str
+    fetched_at: str
+    first_seen_at: str
+    last_seen_at: str
+    active: bool
+    region: str | None = None
+    commitment_term: str | None = None
+    currency_fx_note: str | None = None
+    source_id: str | None = None
+    source_url: str | None = None
+    source_fingerprint: str | None = None
+
+
+@dataclass
+class EnzanPricingOfferUpsertResponse:
+    """Response from POST /v1/enzan/pricing/offers.
+
+    status is "upserted" (HTTP 201) or "stale" (HTTP 409, newer fetched_at exists).
+    """
+
+    status: str
+    gpu: EnzanGPUOffer | None = None
+    llm: EnzanLLMOffer | None = None
+
+
+@dataclass
 class EnzanResource:
     """GPU resource for Enzan tracking."""
 

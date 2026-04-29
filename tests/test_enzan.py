@@ -1,6 +1,13 @@
+from typing import Any, cast
+
+import pytest
+
+from kaizen.errors import KaizenError, KaizenRateLimitError
 from kaizen.models import (
     EnzanAlertEndpointUpdateRequest,
     EnzanCreateAlertRequest,
+    EnzanGPUOfferUpsertPayload,
+    EnzanLLMOfferUpsertPayload,
     EnzanUpdateAlertRequest,
 )
 from kaizen.services.enzan import EnzanClient
@@ -633,3 +640,619 @@ def test_enzan_update_alert_endpoint_allows_empty_signing_secret_to_clear():
         "/v1/enzan/alerts/endpoints/endpoint-1",
         {"signingSecret": ""},
     )
+
+
+def test_enzan_pricing_refresh_trigger_and_log_and_providers():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/pricing/refresh": {
+                "status": "queued",
+                "triggeredBy": "33333333-3333-3333-3333-333333333333",
+            },
+            "/v1/enzan/pricing/refresh/log?limit=5": {
+                "entries": [
+                    {
+                        "id": "11111111-1111-1111-1111-111111111111",
+                        "kind": "on_demand",
+                        "status": "success",
+                        "rowsUpserted": 0,
+                        "rowsSkipped": 0,
+                        "durationMs": 64,
+                        "startedAt": "2026-04-28T13:56:13.416941Z",
+                        "finishedAt": "2026-04-28T13:56:13.483386Z",
+                        "sourceId": "22222222-2222-2222-2222-222222222222",
+                        "sourceName": "manual",
+                        "triggeredBy": "33333333-3333-3333-3333-333333333333",
+                    }
+                ]
+            },
+            "/v1/enzan/pricing/providers": {
+                "providers": [
+                    {
+                        "id": "44444444-4444-4444-4444-444444444444",
+                        "name": "manual",
+                        "kind": "manual",
+                        "enabled": True,
+                        "refreshIntervalHours": 24,
+                        "hasAdapter": True,
+                    }
+                ]
+            },
+        }
+    )
+    client = EnzanClient(fake)
+
+    triggered = client.trigger_pricing_refresh()
+    log = client.list_pricing_refresh_log(limit=5)
+    providers = client.list_pricing_providers()
+
+    assert triggered.status == "queued"
+    assert triggered.triggered_by == "33333333-3333-3333-3333-333333333333"
+    assert len(log) == 1
+    assert log[0].kind == "on_demand"
+    assert log[0].status == "success"
+    assert log[0].source_name == "manual"
+    assert log[0].duration_ms == 64
+    assert len(providers) == 1
+    assert providers[0].has_adapter is True
+    assert providers[0].kind == "manual"
+
+
+def test_enzan_pricing_refresh_log_passes_limit_through_for_server_clamping():
+    fake = FakeHttp({"/v1/enzan/pricing/refresh/log?limit=500": {"entries": []}})
+    client = EnzanClient(fake)
+    client.list_pricing_refresh_log(limit=500)
+    assert fake.calls[0] == ("GET", "/v1/enzan/pricing/refresh/log?limit=500", None)
+
+
+def test_enzan_pricing_refresh_log_forwards_zero_limit_so_server_can_400():
+    # Codex-flagged: prior behavior dropped the limit query for non-positive
+    # values, hiding the server's "limit must be a positive integer" 400.
+    fake = FakeHttp({"/v1/enzan/pricing/refresh/log?limit=0": {"entries": []}})
+    client = EnzanClient(fake)
+    client.list_pricing_refresh_log(limit=0)
+    assert fake.calls[0] == ("GET", "/v1/enzan/pricing/refresh/log?limit=0", None)
+
+
+def test_enzan_pricing_refresh_log_forwards_negative_limit():
+    fake = FakeHttp({"/v1/enzan/pricing/refresh/log?limit=-1": {"entries": []}})
+    client = EnzanClient(fake)
+    client.list_pricing_refresh_log(limit=-1)
+    assert fake.calls[0] == ("GET", "/v1/enzan/pricing/refresh/log?limit=-1", None)
+
+
+def test_8_2_public_types_exported_from_package_root():
+    # Codex-reviewer finding #1: live-pricing types must be importable from
+    # the package root (`from kaizen import ...`), not just from the
+    # internal models module. Catches root-barrel drift on future SDK
+    # surface additions.
+    import kaizen
+
+    expected = [
+        "EnzanGPUOffer",
+        "EnzanGPUOfferUpsertPayload",
+        "EnzanLLMOffer",
+        "EnzanLLMOfferUpsertPayload",
+        "EnzanPricingOfferUpsertResponse",
+        "EnzanPricingProvider",
+        "EnzanPricingRefreshLogEntry",
+        "EnzanPricingRefreshTriggerResponse",
+    ]
+    for name in expected:
+        assert hasattr(kaizen, name), f"{name} missing from kaizen package root"
+        assert name in kaizen.__all__, f"{name} missing from kaizen.__all__"
+
+
+def test_enzan_trigger_pricing_refresh_raises_when_server_omits_required_field():
+    # Maya finding #2: trigger response should match the strictness of
+    # offer/log/providers mappers — required fields use _required so contract
+    # drift surfaces as KaizenError, not as empty-string defaults.
+    fake = FakeHttp({"/v1/enzan/pricing/refresh": {"status": "queued"}})  # missing triggeredBy
+    client = EnzanClient(fake)
+    with pytest.raises(KaizenError) as exc_info:
+        client.trigger_pricing_refresh()
+    assert exc_info.value.data["container"] == "refresh_trigger"
+    assert exc_info.value.data["missing_field"] == "triggeredBy"
+
+
+def test_enzan_pricing_refresh_trigger_surfaces_429_dropped_as_rate_limit_error():
+    """The real HttpClient throws KaizenRateLimitError on 429.
+
+    The dropped body ({status:"dropped",triggeredBy:"..."}) is preserved on
+    err.data so callers can branch on the typed error and read the body
+    fields without a separate decode.
+    """
+
+    class ThrowingHttp:
+        def post(self, path, data):  # noqa: ARG002
+            raise KaizenRateLimitError(
+                "rate limited",
+                data={
+                    "status": "dropped",
+                    "triggeredBy": "33333333-3333-3333-3333-333333333333",
+                },
+            )
+
+    client = EnzanClient(cast(Any, ThrowingHttp()))
+    with pytest.raises(KaizenRateLimitError) as exc_info:
+        client.trigger_pricing_refresh()
+    assert exc_info.value.status == 429
+    assert exc_info.value.data["status"] == "dropped"
+    assert exc_info.value.data["triggeredBy"] == "33333333-3333-3333-3333-333333333333"
+
+
+def test_enzan_pricing_refresh_log_handles_nullable_source_fields():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/pricing/refresh/log": {
+                "entries": [
+                    {
+                        "id": "11111111-1111-1111-1111-111111111111",
+                        "kind": "scheduled",
+                        "status": "failed",
+                        "rowsUpserted": 0,
+                        "rowsSkipped": 0,
+                        "startedAt": "2026-04-28T13:00:00Z",
+                        "error": "source removed mid-sweep",
+                    }
+                ]
+            }
+        }
+    )
+    client = EnzanClient(fake)
+    log = client.list_pricing_refresh_log()
+    assert len(log) == 1
+    assert log[0].source_id is None
+    assert log[0].source_name is None
+    assert log[0].triggered_by is None
+    assert log[0].duration_ms is None
+    assert log[0].finished_at is None
+    assert log[0].error == "source removed mid-sweep"
+
+
+def test_enzan_upsert_pricing_offer_surfaces_409_stale_as_kaizen_error():
+    """The real HttpClient throws KaizenError on 409.
+
+    The stale body ({status:"stale"}) is preserved on err.data.
+    """
+
+    class ThrowingHttp:
+        def post(self, path, data):  # noqa: ARG002
+            raise KaizenError("conflict", status=409, data={"status": "stale"})
+
+    client = EnzanClient(cast(Any, ThrowingHttp()))
+    with pytest.raises(KaizenError) as exc_info:
+        client.upsert_pricing_offer(
+            gpu=EnzanGPUOfferUpsertPayload(
+                provider="manual-smoke",
+                gpu_type="h100-80gb",
+                display_name="Smoke H100",
+                hourly_rate_usd=2.99,
+                deployment_class="on_demand",
+            )
+        )
+    assert exc_info.value.status == 409
+    assert exc_info.value.data["status"] == "stale"
+
+
+def test_enzan_pricing_providers_raises_when_required_field_is_missing():
+    # Claude pass 2: providers endpoint must use the same _required strictness
+    # as the offer + log endpoints — silently defaulting `enabled` or
+    # `has_adapter` to False on missing fields could mislead an operator.
+    fake = FakeHttp(
+        {
+            "/v1/enzan/pricing/providers": {
+                "providers": [
+                    {
+                        "id": "44444444-4444-4444-4444-444444444444",
+                        "name": "aws",
+                        "kind": "api",
+                        # `enabled` and `hasAdapter` intentionally omitted
+                        "refreshIntervalHours": 24,
+                    }
+                ]
+            }
+        }
+    )
+    client = EnzanClient(fake)
+    with pytest.raises(KaizenError) as exc_info:
+        client.list_pricing_providers()
+    assert exc_info.value.data["container"] == "provider"
+
+
+def test_enzan_pricing_providers_handles_optional_freshness_fields():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/pricing/providers": {
+                "providers": [
+                    {
+                        "id": "44444444-4444-4444-4444-444444444444",
+                        "name": "aws",
+                        "kind": "api",
+                        "enabled": True,
+                        "refreshIntervalHours": 24,
+                        "hasAdapter": False,
+                    }
+                ]
+            }
+        }
+    )
+    client = EnzanClient(fake)
+    providers = client.list_pricing_providers()
+    assert len(providers) == 1
+    assert providers[0].has_adapter is False
+    assert providers[0].last_success_at is None
+    assert providers[0].last_failure_at is None
+    assert providers[0].last_error is None
+
+
+def test_enzan_upsert_pricing_offer_gpu():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/pricing/offers": {
+                "status": "upserted",
+                "gpu": {
+                    "id": "55555555-5555-5555-5555-555555555555",
+                    "provider": "manual-smoke",
+                    "gpuType": "h100-80gb",
+                    "displayName": "Smoke H100",
+                    "deploymentClass": "on_demand",
+                    "clusterSizeMin": 1,
+                    "interconnectClass": "unknown",
+                    "trainingReady": False,
+                    "hourlyRateUSD": 2.99,
+                    "currency": "USD",
+                    "sourceType": "admin",
+                    "trustStatus": "verified",
+                    "fetchedAt": "2026-04-28T13:57:38Z",
+                    "firstSeenAt": "2026-04-28T13:57:38Z",
+                    "lastSeenAt": "2026-04-28T13:57:38Z",
+                    "active": True,
+                },
+            }
+        }
+    )
+    client = EnzanClient(fake)
+    result = client.upsert_pricing_offer(
+        gpu=EnzanGPUOfferUpsertPayload(
+            provider="manual-smoke",
+            gpu_type="h100-80gb",
+            display_name="Smoke H100",
+            hourly_rate_usd=2.99,
+            deployment_class="on_demand",
+            currency="USD",
+        )
+    )
+
+    assert result.status == "upserted"
+    assert result.gpu is not None
+    assert result.gpu.deployment_class == "on_demand"
+    assert result.gpu.source_type == "admin"
+    assert result.llm is None
+    assert fake.calls[0] == (
+        "POST",
+        "/v1/enzan/pricing/offers",
+        {
+            "gpu": {
+                "provider": "manual-smoke",
+                "gpuType": "h100-80gb",
+                "displayName": "Smoke H100",
+                "hourlyRateUSD": 2.99,
+                "deploymentClass": "on_demand",
+                "currency": "USD",
+            }
+        },
+    )
+
+
+def test_enzan_upsert_pricing_offer_llm_happy_path():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/pricing/offers": {
+                "status": "upserted",
+                "llm": {
+                    "id": "66666666-6666-6666-6666-666666666666",
+                    "provider": "manual-smoke",
+                    "model": "smoke-llm",
+                    "displayName": "Smoke LLM",
+                    "inputCostPer1KTokensUSD": 0.001,
+                    "outputCostPer1KTokensUSD": 0.002,
+                    "currency": "USD",
+                    "sourceType": "admin",
+                    "trustStatus": "verified",
+                    "fetchedAt": "2026-04-28T13:00:00Z",
+                    "firstSeenAt": "2026-04-28T13:00:00Z",
+                    "lastSeenAt": "2026-04-28T13:00:00Z",
+                    "active": True,
+                },
+            }
+        }
+    )
+    client = EnzanClient(fake)
+    result = client.upsert_pricing_offer(
+        llm=EnzanLLMOfferUpsertPayload(
+            provider="manual-smoke",
+            model="smoke-llm",
+            display_name="Smoke LLM",
+            input_cost_per_1k_tokens_usd=0.001,
+            output_cost_per_1k_tokens_usd=0.002,
+            currency="USD",
+        )
+    )
+    assert result.status == "upserted"
+    assert result.llm is not None
+    assert result.llm.model == "smoke-llm"
+    assert result.llm.input_cost_per_1k_tokens_usd == 0.001
+    assert result.llm.output_cost_per_1k_tokens_usd == 0.002
+    assert result.gpu is None
+    method, _path, body = fake.calls[0]
+    assert method == "POST"
+    assert "llm" in body
+    assert "gpu" not in body
+    assert body["llm"]["model"] == "smoke-llm"
+    assert body["llm"]["inputCostPer1KTokensUSD"] == 0.001
+
+
+def test_enzan_upsert_pricing_offer_rejects_missing_or_wrong_type_rate_fields():
+    # Codex pass 9: rate fields must be validated for numeric type, matching
+    # Go's *float64 nil-check and TS's typeof === "number". Caller passing
+    # None or a non-numeric value must surface as ValueError, not silently
+    # serialize null/wrong-type to the wire.
+    client = EnzanClient(cast(Any, FakeHttp({})))
+
+    bad_rate_gpu = EnzanGPUOfferUpsertPayload(
+        provider="p",
+        gpu_type="g",
+        display_name="d",
+        hourly_rate_usd=cast(float, None),
+    )
+    with pytest.raises(ValueError, match="gpu.hourly_rate_usd is required"):
+        client.upsert_pricing_offer(gpu=bad_rate_gpu)
+
+    wrong_type_gpu = EnzanGPUOfferUpsertPayload(
+        provider="p",
+        gpu_type="g",
+        display_name="d",
+        hourly_rate_usd=cast(float, "1.99"),
+    )
+    with pytest.raises(ValueError, match="gpu.hourly_rate_usd is required"):
+        client.upsert_pricing_offer(gpu=wrong_type_gpu)
+
+    bad_input_llm = EnzanLLMOfferUpsertPayload(
+        provider="p",
+        model="m",
+        display_name="d",
+        input_cost_per_1k_tokens_usd=cast(float, None),
+        output_cost_per_1k_tokens_usd=0.0,
+    )
+    with pytest.raises(ValueError, match="llm.input_cost_per_1k_tokens_usd is required"):
+        client.upsert_pricing_offer(llm=bad_input_llm)
+
+
+def test_enzan_upsert_pricing_offer_rejects_non_dataclass_branch_payloads():
+    # Plain Python callers can pass a dict or a primitive instead of the
+    # typed dataclass; the SDK validates type before reading attributes
+    # so this surfaces as ValueError, not AttributeError.
+    client = EnzanClient(cast(Any, FakeHttp({})))
+
+    with pytest.raises(ValueError, match="gpu must be an EnzanGPUOfferUpsertPayload"):
+        client.upsert_pricing_offer(gpu=cast(Any, {"provider": "p"}))
+
+    with pytest.raises(ValueError, match="gpu must be an EnzanGPUOfferUpsertPayload"):
+        client.upsert_pricing_offer(gpu=cast(Any, 1))
+
+    with pytest.raises(ValueError, match="llm must be an EnzanLLMOfferUpsertPayload"):
+        client.upsert_pricing_offer(llm=cast(Any, "string"))
+
+
+def test_enzan_upsert_pricing_offer_raises_when_server_returns_null_for_required_field():
+    # Round 13: explicit null on a non-nullable required field is still
+    # contract drift, not a valid value. Must error like a missing key.
+    fake = FakeHttp(
+        {
+            "/v1/enzan/pricing/offers": {
+                "status": "upserted",
+                "gpu": {
+                    "id": "x",
+                    "provider": "p",
+                    "gpuType": "g",
+                    "displayName": "d",
+                    "deploymentClass": "on_demand",
+                    "clusterSizeMin": 1,
+                    "interconnectClass": "unknown",
+                    "trainingReady": False,
+                    "hourlyRateUSD": 1.99,
+                    "currency": None,  # explicit null on non-nullable required field
+                    "sourceType": "admin",
+                    "trustStatus": "verified",
+                    "fetchedAt": "2026-04-28T13:00:00Z",
+                    "firstSeenAt": "2026-04-28T13:00:00Z",
+                    "lastSeenAt": "2026-04-28T13:00:00Z",
+                    "active": True,
+                },
+            }
+        }
+    )
+    client = EnzanClient(fake)
+    with pytest.raises(KaizenError) as exc_info:
+        client.upsert_pricing_offer(
+            gpu=EnzanGPUOfferUpsertPayload(
+                provider="p", gpu_type="g", display_name="d", hourly_rate_usd=1.99
+            )
+        )
+    assert exc_info.value.data["missing_field"] == "currency"
+
+
+def test_enzan_upsert_pricing_offer_raises_when_server_omits_required_fields():
+    # Codex pass 12: response mappers must NOT fabricate USD/0/False
+    # defaults for fields documented as required. Silently surfacing a
+    # broken server response as a "free USD offer" is unsafe for admin
+    # pricing APIs. The mapper raises KaizenError with the missing-field
+    # name in err.data so callers can diagnose contract drift.
+    fake = FakeHttp(
+        {
+            "/v1/enzan/pricing/offers": {
+                "status": "upserted",
+                "gpu": {
+                    "id": "x",
+                    "provider": "p",
+                    "gpuType": "g",
+                    "displayName": "d",
+                    # currency and rate fields intentionally missing
+                },
+            }
+        }
+    )
+    client = EnzanClient(fake)
+    with pytest.raises(KaizenError) as exc_info:
+        client.upsert_pricing_offer(
+            gpu=EnzanGPUOfferUpsertPayload(
+                provider="p",
+                gpu_type="g",
+                display_name="d",
+                hourly_rate_usd=1.0,
+            )
+        )
+    assert exc_info.value.data["container"] == "gpu"
+    assert "missing_field" in exc_info.value.data
+
+
+def test_enzan_upsert_pricing_offer_rejects_nan_and_inf_rate_values():
+    # NaN/Inf must be rejected client-side (matches Go math.IsNaN/IsInf and
+    # TS Number.isFinite) so they never reach the wire as malformed JSON.
+    # Distinct error message from "is required" so debugging a NaN
+    # submission doesn't send callers hunting for a missing field.
+    client = EnzanClient(cast(Any, FakeHttp({})))
+
+    with pytest.raises(ValueError, match="gpu.hourly_rate_usd must be a finite number"):
+        client.upsert_pricing_offer(
+            gpu=EnzanGPUOfferUpsertPayload(
+                provider="p",
+                gpu_type="g",
+                display_name="d",
+                hourly_rate_usd=float("nan"),
+            )
+        )
+
+    with pytest.raises(ValueError, match="llm.input_cost_per_1k_tokens_usd must be a finite number"):
+        client.upsert_pricing_offer(
+            llm=EnzanLLMOfferUpsertPayload(
+                provider="p",
+                model="m",
+                display_name="d",
+                input_cost_per_1k_tokens_usd=float("inf"),
+                output_cost_per_1k_tokens_usd=0.0,
+            )
+        )
+
+
+def test_enzan_upsert_pricing_offer_rejects_bool_as_rate_value():
+    # Python's bool is a subclass of int. The validator's explicit
+    # isinstance(value, bool) guard rejects True/False so they don't
+    # silently serialize as 1/0 on the wire. Test guards against the
+    # guard being removed in a future refactor.
+    client = EnzanClient(cast(Any, FakeHttp({})))
+    with pytest.raises(ValueError, match="gpu.hourly_rate_usd is required"):
+        client.upsert_pricing_offer(
+            gpu=EnzanGPUOfferUpsertPayload(
+                provider="p",
+                gpu_type="g",
+                display_name="d",
+                hourly_rate_usd=cast(float, True),
+            )
+        )
+
+
+def test_enzan_upsert_pricing_offer_allows_explicit_zero_rate_for_free_offers():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/pricing/offers": {
+                "status": "upserted",
+                "gpu": {
+                    "id": "x",
+                    "provider": "free",
+                    "gpuType": "g",
+                    "displayName": "d",
+                    "deploymentClass": "on_demand",
+                    "clusterSizeMin": 1,
+                    "interconnectClass": "unknown",
+                    "trainingReady": False,
+                    "hourlyRateUSD": 0.0,
+                    "currency": "USD",
+                    "sourceType": "admin",
+                    "trustStatus": "verified",
+                    "fetchedAt": "2026-04-28T13:00:00Z",
+                    "firstSeenAt": "2026-04-28T13:00:00Z",
+                    "lastSeenAt": "2026-04-28T13:00:00Z",
+                    "active": True,
+                },
+            }
+        }
+    )
+    client = EnzanClient(fake)
+    result = client.upsert_pricing_offer(
+        gpu=EnzanGPUOfferUpsertPayload(
+            provider="free",
+            gpu_type="g",
+            display_name="d",
+            hourly_rate_usd=0.0,
+        )
+    )
+    assert result.status == "upserted"
+    assert result.gpu is not None
+    assert result.gpu.hourly_rate_usd == 0.0
+
+
+def test_enzan_upsert_pricing_offer_rejects_none_or_wrong_type_string_fields():
+    # Codex pass 6: dataclasses don't enforce types at runtime; .strip() on
+    # None would AttributeError. Validation should surface this as ValueError.
+    client = EnzanClient(cast(Any, FakeHttp({})))
+
+    bad_gpu = EnzanGPUOfferUpsertPayload(
+        provider=cast(str, None),
+        gpu_type="g",
+        display_name="d",
+        hourly_rate_usd=1.0,
+    )
+    with pytest.raises(ValueError, match="gpu.provider is required"):
+        client.upsert_pricing_offer(gpu=bad_gpu)
+
+    wrong_type_gpu = EnzanGPUOfferUpsertPayload(
+        provider="p",
+        gpu_type=cast(str, 42),  # int, not string
+        display_name="d",
+        hourly_rate_usd=1.0,
+    )
+    with pytest.raises(ValueError, match="gpu.gpu_type is required"):
+        client.upsert_pricing_offer(gpu=wrong_type_gpu)
+
+    bad_llm = EnzanLLMOfferUpsertPayload(
+        provider="p",
+        model=cast(str, None),
+        display_name="d",
+        input_cost_per_1k_tokens_usd=0.0,
+        output_cost_per_1k_tokens_usd=0.0,
+    )
+    with pytest.raises(ValueError, match="llm.model is required"):
+        client.upsert_pricing_offer(llm=bad_llm)
+
+
+def test_enzan_upsert_pricing_offer_rejects_both_or_neither():
+    client = EnzanClient(FakeHttp({}))
+
+    with pytest.raises(ValueError, match="exactly one of gpu or llm"):
+        client.upsert_pricing_offer()
+
+    with pytest.raises(ValueError, match="exactly one of gpu or llm"):
+        client.upsert_pricing_offer(
+            gpu=EnzanGPUOfferUpsertPayload(
+                provider="p", gpu_type="g", display_name="d", hourly_rate_usd=1.0
+            ),
+            llm=EnzanLLMOfferUpsertPayload(
+                provider="p",
+                model="m",
+                display_name="d",
+                input_cost_per_1k_tokens_usd=0.0,
+                output_cost_per_1k_tokens_usd=0.0,
+            ),
+        )

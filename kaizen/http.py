@@ -68,9 +68,12 @@ class HttpClient:
                     message,
                     int(retry_after) if retry_after else None,
                     request_id=request_id,
+                    data=data,
                 )
             if response.status_code >= 400:
-                raise KaizenError(message, response.status_code, request_id=request_id)
+                raise KaizenError(
+                    message, response.status_code, request_id=request_id, data=data
+                )
 
             return data
         except httpx.RequestError as error:

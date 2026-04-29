@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import quote
@@ -18,8 +19,12 @@ from ..models import (
     EnzanBurnResponse,
     EnzanChatResponse,
     EnzanCreateAlertRequest,
+    EnzanGPUOffer,
+    EnzanGPUOfferUpsertPayload,
     EnzanGPUPricing,
     EnzanGPUPricingMutationResponse,
+    EnzanLLMOffer,
+    EnzanLLMOfferUpsertPayload,
     EnzanLLMPricing,
     EnzanLLMPricingMutationResponse,
     EnzanModelCategoryBreakdown,
@@ -27,6 +32,10 @@ from ..models import (
     EnzanModelCostRow,
     EnzanModelCostTotal,
     EnzanOptimizeResponse,
+    EnzanPricingOfferUpsertResponse,
+    EnzanPricingProvider,
+    EnzanPricingRefreshLogEntry,
+    EnzanPricingRefreshTriggerResponse,
     EnzanRecommendation,
     EnzanResource,
     EnzanRoutingConfig,
@@ -251,6 +260,168 @@ class EnzanClient:
                 currency=pricing.get("currency", "USD"),
                 active=pricing.get("active", True),
             ),
+        )
+
+    def trigger_pricing_refresh(self) -> EnzanPricingRefreshTriggerResponse:
+        """Trigger an on-demand live-pricing refresh sweep (admin only).
+
+        Fire-and-forget: returns immediately. Poll list_pricing_refresh_log()
+        for completion status. Returns status="queued" on HTTP 202; HTTP 429
+        (concurrency cap) is surfaced as KaizenRateLimitError with the typed
+        body in err.data.
+
+        Both response fields are required and non-nullable per the OpenAPI
+        spec — uses _required to surface contract drift consistently with
+        the offer / refresh-log / providers mappers, rather than silently
+        defaulting to empty strings.
+        """
+
+        result = self._http.post("/v1/enzan/pricing/refresh", {})
+        return EnzanPricingRefreshTriggerResponse(
+            status=_required(result, "status", "refresh_trigger"),
+            triggered_by=_required(result, "triggeredBy", "refresh_trigger"),
+        )
+
+    def list_pricing_refresh_log(
+        self, limit: int | None = None
+    ) -> list[EnzanPricingRefreshLogEntry]:
+        """List recent live-pricing refresh log entries (admin only).
+
+        Server default is 50 entries; server clamps `limit` to 1..200 and
+        rejects non-positive values with 400. Pass None to use the server
+        default; pass a value to forward verbatim (including 0 and
+        negative — those will hit server-side validation rather than being
+        silently dropped client-side).
+        """
+
+        path = "/v1/enzan/pricing/refresh/log"
+        if limit is not None:
+            path = f"{path}?limit={limit}"
+        result = self._http.get(path)
+        # Required fields use _required so server contract drift surfaces
+        # as KaizenError rather than empty/zero defaults that propagate
+        # silently through callers. Nullable optional fields (sourceId,
+        # sourceName, triggeredBy, durationMs, error, finishedAt) use
+        # .get() since the OpenAPI spec marks them nullable.
+        return [
+            EnzanPricingRefreshLogEntry(
+                id=_required(row, "id", "refresh_log_entry"),
+                kind=_required(row, "kind", "refresh_log_entry"),
+                status=_required(row, "status", "refresh_log_entry"),
+                rows_upserted=_required(row, "rowsUpserted", "refresh_log_entry"),
+                rows_skipped=_required(row, "rowsSkipped", "refresh_log_entry"),
+                started_at=_required(row, "startedAt", "refresh_log_entry"),
+                source_id=row.get("sourceId"),
+                source_name=row.get("sourceName"),
+                triggered_by=row.get("triggeredBy"),
+                duration_ms=row.get("durationMs"),
+                error=row.get("error"),
+                finished_at=row.get("finishedAt"),
+            )
+            for row in result.get("entries", [])
+        ]
+
+    def list_pricing_providers(self) -> list[EnzanPricingProvider]:
+        """List registered live-pricing sources (admin view).
+
+        Required fields use _required so server contract drift surfaces as
+        KaizenError rather than silently producing providers with empty
+        identifiers or `enabled=False` / `has_adapter=False` defaults that
+        could mislead an operator. Matches the strictness applied to log
+        entries and offer responses.
+        """
+
+        result = self._http.get("/v1/enzan/pricing/providers")
+        return [
+            EnzanPricingProvider(
+                id=_required(row, "id", "provider"),
+                name=_required(row, "name", "provider"),
+                kind=_required(row, "kind", "provider"),
+                enabled=_required(row, "enabled", "provider"),
+                refresh_interval_hours=_required(row, "refreshIntervalHours", "provider"),
+                has_adapter=_required(row, "hasAdapter", "provider"),
+                last_success_at=row.get("lastSuccessAt"),
+                last_failure_at=row.get("lastFailureAt"),
+                last_error=row.get("lastError"),
+            )
+            for row in result.get("providers", [])
+        ]
+
+    def upsert_pricing_offer(
+        self,
+        *,
+        gpu: EnzanGPUOfferUpsertPayload | None = None,
+        llm: EnzanLLMOfferUpsertPayload | None = None,
+    ) -> EnzanPricingOfferUpsertResponse:
+        """Upsert one manual (admin-authored) live-pricing offer.
+
+        Exactly one of `gpu` or `llm` must be provided. Returns status="upserted"
+        (HTTP 201) on success or status="stale" (HTTP 409) when a newer
+        fetched_at row exists for the same key.
+
+        Client-side validation rejects empty string identifiers (provider,
+        gpu_type/model, display_name) and missing/non-finite/wrong-type rate
+        values (None, NaN, Infinity, non-numeric) before hitting the wire;
+        explicit zero is preserved as a free offer. The server remains the
+        authority on rate semantics beyond finiteness (e.g. domain-specific
+        bounds).
+        """
+
+        if (gpu is None) == (llm is None):
+            raise ValueError("exactly one of gpu or llm must be set")
+        # Type-check the branch payload itself before reading attributes —
+        # plain Python callers can pass a dict or a primitive instead of
+        # the dataclass, which would otherwise AttributeError on .provider.
+        if gpu is not None and not isinstance(gpu, EnzanGPUOfferUpsertPayload):
+            raise ValueError("gpu must be an EnzanGPUOfferUpsertPayload")
+        if llm is not None and not isinstance(llm, EnzanLLMOfferUpsertPayload):
+            raise ValueError("llm must be an EnzanLLMOfferUpsertPayload")
+
+        # isinstance + strip() — dataclasses don't enforce types at runtime,
+        # so None or wrong-type values would AttributeError on a bare strip().
+        # The validation surface should reject those as ValueError, not crash.
+        def _require_string(value: Any, label: str) -> None:
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{label} is required")
+
+        # Rate fields are validated for finite numeric type so wire payloads
+        # can never silently carry `null`, wrong-type, NaN, or Infinity
+        # values that would otherwise reach the server unchecked. Explicit
+        # zero is allowed (matches Go's Float64Ptr(0) free-offer convention
+        # and TS's Number.isFinite check). bool excluded because Python
+        # treats bools as ints. Distinct messages so debugging a NaN
+        # submission doesn't send the caller hunting for a missing field.
+        def _require_number(value: Any, label: str) -> None:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{label} is required")
+            if not math.isfinite(value):
+                raise ValueError(f"{label} must be a finite number")
+
+        payload: dict[str, Any] = {}
+        if gpu is not None:
+            _require_string(gpu.provider, "gpu.provider")
+            _require_string(gpu.gpu_type, "gpu.gpu_type")
+            _require_string(gpu.display_name, "gpu.display_name")
+            _require_number(gpu.hourly_rate_usd, "gpu.hourly_rate_usd")
+            payload["gpu"] = _gpu_offer_payload_dict(gpu)
+        else:
+            assert llm is not None
+            _require_string(llm.provider, "llm.provider")
+            _require_string(llm.model, "llm.model")
+            _require_string(llm.display_name, "llm.display_name")
+            _require_number(llm.input_cost_per_1k_tokens_usd, "llm.input_cost_per_1k_tokens_usd")
+            _require_number(llm.output_cost_per_1k_tokens_usd, "llm.output_cost_per_1k_tokens_usd")
+            payload["llm"] = _llm_offer_payload_dict(llm)
+        result = self._http.post("/v1/enzan/pricing/offers", payload)
+        gpu_row = result.get("gpu")
+        llm_row = result.get("llm")
+        # Status passes through verbatim. HTTP 409 (stale write) is surfaced
+        # by the http client as KaizenError with the typed body in err.data,
+        # so this success-path code is only reached for HTTP 201 responses.
+        return EnzanPricingOfferUpsertResponse(
+            status=result.get("status", ""),
+            gpu=_gpu_offer_from_dict(gpu_row) if gpu_row else None,
+            llm=_llm_offer_from_dict(llm_row) if llm_row else None,
         )
 
     def burn(self) -> EnzanBurnResponse:
@@ -655,3 +826,129 @@ class EnzanClient:
     def delete_alert_endpoint(self, endpoint_id: str) -> dict[str, str]:
         path = f"/v1/enzan/alerts/endpoints/{quote(endpoint_id, safe='')}"
         return self._http.request("DELETE", path)
+
+
+def _gpu_offer_payload_dict(p: EnzanGPUOfferUpsertPayload) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "provider": p.provider,
+        "gpuType": p.gpu_type,
+        "displayName": p.display_name,
+        "hourlyRateUSD": p.hourly_rate_usd,
+    }
+    if p.region is not None:
+        payload["region"] = p.region
+    if p.deployment_class is not None:
+        payload["deploymentClass"] = p.deployment_class
+    if p.commitment_term is not None:
+        payload["commitmentTerm"] = p.commitment_term
+    if p.cluster_size_min is not None:
+        payload["clusterSizeMin"] = p.cluster_size_min
+    if p.cluster_size_max is not None:
+        payload["clusterSizeMax"] = p.cluster_size_max
+    if p.interconnect_class is not None:
+        payload["interconnectClass"] = p.interconnect_class
+    if p.training_ready is not None:
+        payload["trainingReady"] = p.training_ready
+    if p.currency is not None:
+        payload["currency"] = p.currency
+    if p.currency_fx_note is not None:
+        payload["currencyFxNote"] = p.currency_fx_note
+    if p.source_url is not None:
+        payload["sourceUrl"] = p.source_url
+    return payload
+
+
+def _llm_offer_payload_dict(p: EnzanLLMOfferUpsertPayload) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "provider": p.provider,
+        "model": p.model,
+        "displayName": p.display_name,
+        "inputCostPer1KTokensUSD": p.input_cost_per_1k_tokens_usd,
+        "outputCostPer1KTokensUSD": p.output_cost_per_1k_tokens_usd,
+    }
+    if p.region is not None:
+        payload["region"] = p.region
+    if p.commitment_term is not None:
+        payload["commitmentTerm"] = p.commitment_term
+    if p.currency is not None:
+        payload["currency"] = p.currency
+    if p.currency_fx_note is not None:
+        payload["currencyFxNote"] = p.currency_fx_note
+    if p.source_url is not None:
+        payload["sourceUrl"] = p.source_url
+    return payload
+
+
+def _required(row: dict[str, Any], key: str, container: str) -> Any:
+    """Return row[key], raising KaizenError if missing or null.
+
+    Used for offer-response fields documented as `required` and
+    non-nullable in OpenAPI. Both omission and explicit `null` are
+    contract violations on these fields — defaulting either to
+    USD/0/False would silently mask server drift on an admin pricing API.
+    """
+
+    value = row.get(key, _MISSING)
+    if value is _MISSING or value is None:
+        from ..errors import KaizenError
+
+        raise KaizenError(
+            f"server response is missing required field {container}.{key}",
+            data={"container": container, "missing_field": key, "received": row},
+        )
+    return value
+
+
+_MISSING: Any = object()
+
+
+def _gpu_offer_from_dict(row: dict[str, Any]) -> EnzanGPUOffer:
+    return EnzanGPUOffer(
+        id=_required(row, "id", "gpu"),
+        provider=_required(row, "provider", "gpu"),
+        gpu_type=_required(row, "gpuType", "gpu"),
+        display_name=_required(row, "displayName", "gpu"),
+        deployment_class=_required(row, "deploymentClass", "gpu"),
+        cluster_size_min=_required(row, "clusterSizeMin", "gpu"),
+        interconnect_class=_required(row, "interconnectClass", "gpu"),
+        training_ready=_required(row, "trainingReady", "gpu"),
+        hourly_rate_usd=_required(row, "hourlyRateUSD", "gpu"),
+        currency=_required(row, "currency", "gpu"),
+        source_type=_required(row, "sourceType", "gpu"),
+        trust_status=_required(row, "trustStatus", "gpu"),
+        fetched_at=_required(row, "fetchedAt", "gpu"),
+        first_seen_at=_required(row, "firstSeenAt", "gpu"),
+        last_seen_at=_required(row, "lastSeenAt", "gpu"),
+        active=_required(row, "active", "gpu"),
+        region=row.get("region"),
+        commitment_term=row.get("commitmentTerm"),
+        cluster_size_max=row.get("clusterSizeMax"),
+        currency_fx_note=row.get("currencyFxNote"),
+        source_id=row.get("sourceId"),
+        source_url=row.get("sourceUrl"),
+        source_fingerprint=row.get("sourceFingerprint"),
+    )
+
+
+def _llm_offer_from_dict(row: dict[str, Any]) -> EnzanLLMOffer:
+    return EnzanLLMOffer(
+        id=_required(row, "id", "llm"),
+        provider=_required(row, "provider", "llm"),
+        model=_required(row, "model", "llm"),
+        display_name=_required(row, "displayName", "llm"),
+        input_cost_per_1k_tokens_usd=_required(row, "inputCostPer1KTokensUSD", "llm"),
+        output_cost_per_1k_tokens_usd=_required(row, "outputCostPer1KTokensUSD", "llm"),
+        currency=_required(row, "currency", "llm"),
+        source_type=_required(row, "sourceType", "llm"),
+        trust_status=_required(row, "trustStatus", "llm"),
+        fetched_at=_required(row, "fetchedAt", "llm"),
+        first_seen_at=_required(row, "firstSeenAt", "llm"),
+        last_seen_at=_required(row, "lastSeenAt", "llm"),
+        active=_required(row, "active", "llm"),
+        region=row.get("region"),
+        commitment_term=row.get("commitmentTerm"),
+        currency_fx_note=row.get("currencyFxNote"),
+        source_id=row.get("sourceId"),
+        source_url=row.get("sourceUrl"),
+        source_fingerprint=row.get("sourceFingerprint"),
+    )
