@@ -3,9 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from .._types import QueryMode, SQLDialect
+from ..errors import KaizenError
 from ..http import HttpClient
 from ..models import (
     AkumaExplainResponse,
+    AkumaInteractiveQueryResponse,
     AkumaQueryResponse,
     AkumaSchemaResponse,
     AkumaSource,
@@ -44,6 +46,86 @@ class AkumaClient:
 
         result = self._http.post("/v1/akuma/query", payload)
 
+        return self._parse_query_response(result)
+
+    def query_interactive(
+        self,
+        dialect: SQLDialect,
+        prompt: str,
+        mode: QueryMode = "sql-only",
+        max_rows: int | None = None,
+        guardrails: Guardrails | None = None,
+        source_id: str | None = None,
+    ) -> AkumaInteractiveQueryResponse:
+        payload: dict[str, Any] = {
+            "dialect": dialect,
+            "prompt": prompt,
+            "mode": mode,
+        }
+        if max_rows is not None:
+            payload["maxRows"] = max_rows
+        if guardrails:
+            payload["guardrails"] = guardrails.to_dict()
+        if source_id:
+            payload["sourceId"] = source_id
+
+        result = self._http.post("/v1/akuma/queries/interactive", payload)
+
+        if not isinstance(result, dict):
+            raise KaizenError(
+                "interactive query response must be an object",
+                code="INVALID_RESPONSE",
+                data={"response": result},
+            )
+        status = result.get("status")
+        if not isinstance(status, str) or status.strip() == "":
+            raise KaizenError(
+                "interactive query response missing status",
+                code="INVALID_RESPONSE",
+                data=result,
+            )
+        has_query_result = "result" in result
+        query_result = result.get("result")
+        if has_query_result and not isinstance(query_result, dict):
+            raise KaizenError(
+                "interactive query response result must be an object",
+                code="INVALID_RESPONSE",
+                data=result,
+            )
+        if status in {"completed", "rejected"} and not has_query_result:
+            raise KaizenError(
+                "interactive query response missing result",
+                code="INVALID_RESPONSE",
+                data=result,
+            )
+        if isinstance(query_result, dict):
+            query_error = query_result.get("error")
+            if status == "rejected" and (
+                not isinstance(query_error, str) or query_error.strip() == ""
+            ):
+                raise KaizenError(
+                    "interactive query rejected response missing error",
+                    code="INVALID_RESPONSE",
+                    data=result,
+                )
+            if status == "completed" and isinstance(query_error, str) and query_error.strip() != "":
+                raise KaizenError(
+                    "interactive query completed response must not include error",
+                    code="INVALID_RESPONSE",
+                    data=result,
+                )
+        parsed_result = None
+        if isinstance(query_result, dict):
+            parsed_result = self._parse_query_response(query_result)
+
+        return AkumaInteractiveQueryResponse(
+            status=status,
+            result=parsed_result,
+            raw_response=result,
+        )
+
+    @staticmethod
+    def _parse_query_response(result: dict[str, Any]) -> AkumaQueryResponse:
         return AkumaQueryResponse(
             sql=result.get("sql", ""),
             rows=result.get("rows"),

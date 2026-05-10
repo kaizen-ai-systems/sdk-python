@@ -4,6 +4,7 @@ import os
 from types import TracebackType
 from typing import Any
 
+from .errors import KaizenError
 from .http import HttpClient
 from .services import AkumaClient, EnzanClient, SozoClient
 
@@ -30,7 +31,14 @@ class KaizenClient:
         self._http.set_base_url(url)
 
     def health(self) -> dict[str, Any]:
-        return self._http.get("/health")
+        result = self._http.get("/health")
+        if not isinstance(result, dict):
+            raise KaizenError(
+                "health response must be an object",
+                code="INVALID_RESPONSE",
+                data={"response": result},
+            )
+        return result
 
     def close(self) -> None:
         self._http.close()

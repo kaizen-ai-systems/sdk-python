@@ -43,6 +43,15 @@ class AkumaQueryResponse:
 
 
 @dataclass
+class AkumaInteractiveQueryResponse:
+    """Response from the interactive Akuma query protocol."""
+
+    status: str
+    result: AkumaQueryResponse | None = None
+    raw_response: dict[str, Any] | None = None
+
+
+@dataclass
 class AkumaExplainResponse:
     """Response from Akuma explain."""
 

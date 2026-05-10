@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
 from .._types import GroupByDimension, TimeWindow
@@ -463,7 +463,7 @@ class EnzanClient:
             payload["endpoint"] = resource.endpoint
         if resource.labels:
             payload["labels"] = resource.labels
-        return self._http.post("/v1/enzan/resources", payload)
+        return cast(dict[str, str], self._http.post("/v1/enzan/resources", payload))
 
     def list_alerts(self) -> list[EnzanAlert]:
         result = self._http.get("/v1/enzan/alerts")
@@ -767,7 +767,7 @@ class EnzanClient:
 
     def delete_alert(self, alert_id: str) -> dict[str, str]:
         path = f"/v1/enzan/alerts/{quote(alert_id, safe='')}"
-        return self._http.request("DELETE", path)
+        return cast(dict[str, str], self._http.request("DELETE", path))
 
     def create_alert_endpoint(
         self,
@@ -825,7 +825,7 @@ class EnzanClient:
 
     def delete_alert_endpoint(self, endpoint_id: str) -> dict[str, str]:
         path = f"/v1/enzan/alerts/endpoints/{quote(endpoint_id, safe='')}"
-        return self._http.request("DELETE", path)
+        return cast(dict[str, str], self._http.request("DELETE", path))
 
 
 def _gpu_offer_payload_dict(p: EnzanGPUOfferUpsertPayload) -> dict[str, Any]:

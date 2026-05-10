@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 import httpx
 
@@ -32,13 +32,13 @@ class HttpClient:
     def close(self) -> None:
         self._client.close()
 
-    def get(self, path: str) -> dict[str, Any]:
+    def get(self, path: str) -> Any:
         return self._request("GET", path)
 
-    def post(self, path: str, data: dict[str, Any]) -> dict[str, Any]:
+    def post(self, path: str, data: dict[str, Any]) -> Any:
         return self._request("POST", path, data)
 
-    def request(self, method: str, path: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
+    def request(self, method: str, path: str, data: dict[str, Any] | None = None) -> Any:
         return self._request(method, path, data)
 
     def _request(
@@ -46,7 +46,7 @@ class HttpClient:
         method: str,
         path: str,
         json_data: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    ) -> Any:
         url = f"{self.base_url}{path}"
         headers = {"User-Agent": f"kaizen-python/{SDK_VERSION}"}
         if method != "GET":
@@ -57,34 +57,32 @@ class HttpClient:
         try:
             response = self._client.request(method, url, headers=headers, json=json_data)
             data = self._parse_json(response)
+            error_data = data if isinstance(data, dict) else {"response": data}
             request_id = response.headers.get("X-Request-ID")
-            message = str(data.get("error") or "Request failed")
+            message = str(error_data.get("error") or "Request failed")
 
             if response.status_code == 401:
-                raise KaizenAuthError(message, request_id=request_id)
+                raise KaizenAuthError(message, request_id=request_id, data=error_data)
             if response.status_code == 429:
                 retry_after = response.headers.get("Retry-After")
                 raise KaizenRateLimitError(
                     message,
                     int(retry_after) if retry_after else None,
                     request_id=request_id,
-                    data=data,
+                    data=error_data,
                 )
             if response.status_code >= 400:
                 raise KaizenError(
-                    message, response.status_code, request_id=request_id, data=data
+                    message, response.status_code, request_id=request_id, data=error_data
                 )
 
             return data
         except httpx.RequestError as error:
             raise KaizenError(f"Request failed: {error}") from error
 
-    def _parse_json(self, response: httpx.Response) -> dict[str, Any]:
+    def _parse_json(self, response: httpx.Response) -> Any:
         try:
-            parsed = response.json()
+            return response.json()
         except ValueError:
             text = response.text.strip()
             return {"error": text} if text else {}
-        if isinstance(parsed, dict):
-            return cast(dict[str, Any], parsed)
-        return {}

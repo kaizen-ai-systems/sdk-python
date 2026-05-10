@@ -27,8 +27,13 @@ class KaizenError(Exception):
 class KaizenAuthError(KaizenError):
     """Authentication error."""
 
-    def __init__(self, message: str = "Invalid or missing API key", request_id: str | None = None):
-        super().__init__(message, 401, "AUTH_ERROR", request_id=request_id)
+    def __init__(
+        self,
+        message: str = "Invalid or missing API key",
+        request_id: str | None = None,
+        data: dict[str, Any] | None = None,
+    ):
+        super().__init__(message, 401, "AUTH_ERROR", request_id=request_id, data=data)
 
 
 class KaizenRateLimitError(KaizenError):
