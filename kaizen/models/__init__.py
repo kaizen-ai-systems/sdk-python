@@ -1,4 +1,6 @@
 from .akuma import (
+    AkumaClarification,
+    AkumaClarificationOption,
     AkumaColumn,
     AkumaExplainResponse,
     AkumaForeignKey,
@@ -55,6 +57,8 @@ from .enzan import (
 from .sozo import SozoColumnStats, SozoGenerateResponse, SozoSchemaInfo
 
 __all__ = [
+    "AkumaClarification",
+    "AkumaClarificationOption",
     "AkumaColumn",
     "AkumaExplainResponse",
     "AkumaForeignKey",

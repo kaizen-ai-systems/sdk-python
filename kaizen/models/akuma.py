@@ -43,11 +43,38 @@ class AkumaQueryResponse:
 
 
 @dataclass
+class AkumaClarificationOption:
+    """One disambiguation choice presented in a needs_clarification response."""
+
+    id: str
+    label: str
+    description: str | None = None
+
+
+@dataclass
+class AkumaClarification:
+    """Structured payload returned alongside a needs_clarification status.
+
+    `clarification_token` is opaque; clients echo it back verbatim on consume.
+    """
+
+    clarification_token: str
+    question: str
+    options: list[AkumaClarificationOption]
+    expires_at: str
+
+
+@dataclass
 class AkumaInteractiveQueryResponse:
-    """Response from the interactive Akuma query protocol."""
+    """Response from the interactive Akuma query protocol.
+
+    Either `result` (completed/rejected) or `clarification` (needs_clarification)
+    is set; future statuses pass through `raw_response` only.
+    """
 
     status: str
     result: AkumaQueryResponse | None = None
+    clarification: AkumaClarification | None = None
     raw_response: dict[str, Any] | None = None
 
 

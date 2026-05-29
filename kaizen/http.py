@@ -38,14 +38,21 @@ class HttpClient:
     def post(self, path: str, data: dict[str, Any]) -> Any:
         return self._request("POST", path, data)
 
-    def request(self, method: str, path: str, data: dict[str, Any] | None = None) -> Any:
-        return self._request(method, path, data)
+    def request(
+        self,
+        method: str,
+        path: str,
+        data: dict[str, Any] | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ) -> Any:
+        return self._request(method, path, data, extra_headers)
 
     def _request(
         self,
         method: str,
         path: str,
         json_data: dict[str, Any] | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> Any:
         url = f"{self.base_url}{path}"
         headers = {"User-Agent": f"kaizen-python/{SDK_VERSION}"}
@@ -53,6 +60,10 @@ class HttpClient:
             headers["Content-Type"] = "application/json"
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        if extra_headers:
+            for key, value in extra_headers.items():
+                if isinstance(value, str) and value.strip():
+                    headers[key] = value
 
         try:
             response = self._client.request(method, url, headers=headers, json=json_data)

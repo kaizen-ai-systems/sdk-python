@@ -20,9 +20,12 @@ class FakeHttp:
         self.calls.append(("GET", path, None))
         return self.responses[path]
 
-    def request(self, method, path, data=None):
-        self.calls.append((method, path, data))
-        return self.responses[(method, path)]
+    def request(self, method, path, data=None, extra_headers=None):
+        self.calls.append((method, path, data, extra_headers))
+        key = (method, path)
+        if key in self.responses:
+            return self.responses[key]
+        return self.responses[path]
 
 
 def test_sozo_requires_schema_or_schema_name():
@@ -205,10 +208,12 @@ def test_akuma_query_interactive_requires_result_for_current_statuses(status):
 
 
 def test_akuma_query_interactive_allows_future_status_without_result():
+    # PR 1b: needs_clarification is now a known status with required clarification
+    # shape; cover forward-compat passthrough with a genuinely future status.
     fake = FakeHttp(
         {
             "/v1/akuma/queries/interactive": {
-                "status": "needs_clarification",
+                "status": "deferred",
                 "prompt": "Which table should I use?",
             }
         }
@@ -216,10 +221,10 @@ def test_akuma_query_interactive_allows_future_status_without_result():
     client = AkumaClient(fake)
     response = client.query_interactive(dialect="postgres", prompt="show one row")
 
-    assert response.status == "needs_clarification"
+    assert response.status == "deferred"
     assert response.result is None
     assert response.raw_response == {
-        "status": "needs_clarification",
+        "status": "deferred",
         "prompt": "Which table should I use?",
     }
 
@@ -227,10 +232,11 @@ def test_akuma_query_interactive_allows_future_status_without_result():
 @pytest.mark.parametrize(
     ("status", "query_result"),
     [
+        # `needs_clarification` no longer takes `result`; cover malformed-result
+        # branches with statuses that do require result.
         ("completed", None),
         ("rejected", None),
-        ("needs_clarification", None),
-        ("needs_clarification", []),
+        ("rejected", []),
     ],
 )
 def test_akuma_query_interactive_rejects_non_object_result(status, query_result):
@@ -252,6 +258,107 @@ def test_akuma_query_interactive_rejects_non_object_result(status, query_result)
         "result": query_result,
     }
     assert raised.value.code == "INVALID_RESPONSE"
+
+
+def test_akuma_query_interactive_decodes_needs_clarification():
+    fake = FakeHttp(
+        {
+            "/v1/akuma/queries/interactive": {
+                "status": "needs_clarification",
+                "clarification": {
+                    "clarificationToken": "tok-abc",
+                    "question": "Which window?",
+                    "options": [
+                        {"id": "7d", "label": "Last 7 days"},
+                        {"id": "30d", "label": "Last 30 days", "description": "Default"},
+                    ],
+                    "expiresAt": "2030-01-01T00:00:00Z",
+                },
+            }
+        }
+    )
+    client = AkumaClient(fake)
+    response = client.query_interactive(dialect="postgres", prompt="show me usage")
+
+    assert response.status == "needs_clarification"
+    assert response.result is None
+    assert response.clarification is not None
+    assert response.clarification.clarification_token == "tok-abc"
+    assert response.clarification.question == "Which window?"
+    assert len(response.clarification.options) == 2
+    assert response.clarification.options[1].description == "Default"
+
+
+def test_akuma_query_interactive_rejects_needs_clarification_without_clarification():
+    fake = FakeHttp({"/v1/akuma/queries/interactive": {"status": "needs_clarification"}})
+    client = AkumaClient(fake)
+    with pytest.raises(KaizenError) as raised:
+        client.query_interactive(dialect="postgres", prompt="x")
+    assert raised.value.code == "INVALID_RESPONSE"
+
+
+def test_akuma_query_interactive_rejects_needs_clarification_with_insufficient_options():
+    fake = FakeHttp(
+        {
+            "/v1/akuma/queries/interactive": {
+                "status": "needs_clarification",
+                "clarification": {
+                    "clarificationToken": "tok",
+                    "question": "q",
+                    "options": [{"id": "only", "label": "only"}],
+                    "expiresAt": "2030-01-01T00:00:00Z",
+                },
+            }
+        }
+    )
+    client = AkumaClient(fake)
+    with pytest.raises(KaizenError) as raised:
+        client.query_interactive(dialect="postgres", prompt="x")
+    assert raised.value.code == "INVALID_RESPONSE"
+
+
+def test_akuma_consume_clarification_forwards_idempotency_header():
+    fake = FakeHttp(
+        {
+            ("POST", "/v1/akuma/queries/interactive"): {
+                "status": "completed",
+                "result": {"sql": "SELECT 1"},
+            }
+        }
+    )
+    client = AkumaClient(fake)
+    response = client.consume_clarification(
+        clarification_token="tok-abc",
+        option_id="7d",
+        idempotency_key="key-1",
+    )
+    assert response.status == "completed"
+    assert response.result is not None and response.result.sql == "SELECT 1"
+    assert fake.calls == [
+        (
+            "POST",
+            "/v1/akuma/queries/interactive",
+            {"clarificationToken": "tok-abc", "optionId": "7d"},
+            {"Idempotency-Key": "key-1"},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("token", "option", "key"),
+    [
+        ("", "7d", "k"),
+        ("tok", "", "k"),
+        ("tok", "7d", ""),
+    ],
+)
+def test_akuma_consume_clarification_rejects_missing_fields(token, option, key):
+    client = AkumaClient(FakeHttp({}))
+    with pytest.raises(KaizenError) as raised:
+        client.consume_clarification(
+            clarification_token=token, option_id=option, idempotency_key=key
+        )
+    assert raised.value.code == "INVALID_REQUEST"
 
 
 def test_akuma_create_source_maps_response():
