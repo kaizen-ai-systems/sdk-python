@@ -92,6 +92,107 @@ def test_akuma_query_interactive_posts_payload():
     ]
 
 
+def test_akuma_query_interactive_parses_provenance():
+    fake = FakeHttp(
+        {
+            "/v1/akuma/queries/interactive": {
+                "status": "completed",
+                "result": {"sql": "SELECT u.name FROM users u"},
+                "provenance": {
+                    "provenanceFidelity": "full",
+                    "dialect": "postgres",
+                    "tables": ["users"],
+                    "joins": [],
+                    "filters": [{"clause": "where", "expression": "u.active"}],
+                    "projections": [{"expression": "u.name"}],
+                    "aggregations": {"groupBy": [], "functions": []},
+                    "warnings": [],
+                },
+            }
+        }
+    )
+    client = AkumaClient(fake)
+    response = client.query_interactive(dialect="postgres", prompt="active users")
+
+    assert response.provenance is not None
+    assert response.provenance.provenance_fidelity == "full"
+    assert response.provenance.tables == ["users"]
+    assert response.provenance.filters[0].clause == "where"
+    assert response.provenance.aggregations.group_by == []
+
+
+def test_akuma_query_interactive_rejects_non_object_provenance_on_completed():
+    fake = FakeHttp(
+        {
+            "/v1/akuma/queries/interactive": {
+                "status": "completed",
+                "result": {"sql": "select 1"},
+                "provenance": "not-an-object",
+            }
+        }
+    )
+    client = AkumaClient(fake)
+    with pytest.raises(KaizenError) as exc:
+        client.query_interactive(dialect="postgres", prompt="x")
+    assert exc.value.code == "INVALID_RESPONSE"
+
+
+def test_akuma_query_interactive_rejects_off_type_provenance_contents():
+    for provenance in [
+        {"provenanceFidelity": "full", "joins": [42]},
+        {"provenanceFidelity": "full", "tables": ["a", 42]},
+        {"provenanceFidelity": "full", "aggregations": "not-an-object"},
+    ]:
+        fake = FakeHttp(
+            {
+                "/v1/akuma/queries/interactive": {
+                    "status": "completed",
+                    "result": {"sql": "select 1"},
+                    "provenance": provenance,
+                }
+            }
+        )
+        client = AkumaClient(fake)
+        with pytest.raises(KaizenError) as exc:
+            client.query_interactive(dialect="postgres", prompt="x")
+        assert exc.value.code == "INVALID_RESPONSE"
+
+
+def test_akuma_query_interactive_rejects_provenance_without_fidelity():
+    fake = FakeHttp(
+        {
+            "/v1/akuma/queries/interactive": {
+                "status": "completed",
+                "result": {"sql": "select 1"},
+                "provenance": {},
+            }
+        }
+    )
+    client = AkumaClient(fake)
+    with pytest.raises(KaizenError) as exc:
+        client.query_interactive(dialect="postgres", prompt="x")
+    assert exc.value.code == "INVALID_RESPONSE"
+    assert "provenanceFidelity" in str(exc.value)
+
+
+def test_akuma_query_interactive_tolerates_off_shape_provenance_on_future_status():
+    fake = FakeHttp(
+        {
+            "/v1/akuma/queries/interactive": {
+                "status": "deferred",
+                "provenance": "not-an-object",
+            }
+        }
+    )
+    client = AkumaClient(fake)
+    response = client.query_interactive(dialect="postgres", prompt="x")
+
+    assert response.status == "deferred"
+    assert response.provenance is None
+    assert response.raw_response is not None
+    assert response.raw_response["provenance"] == "not-an-object"
+
+
 def test_akuma_query_interactive_maps_rejected_response():
     fake = FakeHttp(
         {

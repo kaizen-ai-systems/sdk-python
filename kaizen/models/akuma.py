@@ -65,16 +65,83 @@ class AkumaClarification:
 
 
 @dataclass
+class AkumaProvenanceJoin:
+    """One join recovered from the executed SQL."""
+
+    type: str
+    left: str | None = None
+    right: str | None = None
+    condition: str | None = None
+
+
+@dataclass
+class AkumaProvenanceFilter:
+    """One WHERE/HAVING predicate recovered from the executed SQL."""
+
+    clause: str
+    expression: str
+
+
+@dataclass
+class AkumaProvenanceProjection:
+    """One select-list entry recovered from the executed SQL."""
+
+    expression: str
+    alias: str | None = None
+
+
+@dataclass
+class AkumaProvenanceAggregations:
+    """Grouping shape of the executed SQL."""
+
+    group_by: list[str]
+    functions: list[str]
+
+
+@dataclass
+class AkumaProvenanceWarning:
+    """Enumerated server-side provenance warning.
+
+    Known categories: parser_extraction_failed, dialect_provenance_limited,
+    statement_shape_unsupported; the set is additive over time.
+    """
+
+    category: str
+    detail: str | None = None
+
+
+@dataclass
+class AkumaProvenance:
+    """Structured, server-derived facts about how a completed result was produced.
+
+    `provenance_fidelity` is `full` only when parser-backed extraction succeeded
+    (postgres/mysql); otherwise `limited` (generation-metadata fallback). Never
+    present `limited` provenance as equivalent to `full`.
+    """
+
+    provenance_fidelity: str
+    dialect: str
+    tables: list[str]
+    joins: list[AkumaProvenanceJoin]
+    filters: list[AkumaProvenanceFilter]
+    projections: list[AkumaProvenanceProjection]
+    aggregations: AkumaProvenanceAggregations
+    warnings: list[AkumaProvenanceWarning]
+
+
+@dataclass
 class AkumaInteractiveQueryResponse:
     """Response from the interactive Akuma query protocol.
 
     Either `result` (completed/rejected) or `clarification` (needs_clarification)
-    is set; future statuses pass through `raw_response` only.
+    is set; future statuses pass through `raw_response` only. `provenance` is
+    present only on completed results that carry executed SQL.
     """
 
     status: str
     result: AkumaQueryResponse | None = None
     clarification: AkumaClarification | None = None
+    provenance: AkumaProvenance | None = None
     raw_response: dict[str, Any] | None = None
 
 

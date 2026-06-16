@@ -10,6 +10,12 @@ from ..models import (
     AkumaClarificationOption,
     AkumaExplainResponse,
     AkumaInteractiveQueryResponse,
+    AkumaProvenance,
+    AkumaProvenanceAggregations,
+    AkumaProvenanceFilter,
+    AkumaProvenanceJoin,
+    AkumaProvenanceProjection,
+    AkumaProvenanceWarning,
     AkumaQueryResponse,
     AkumaSchemaResponse,
     AkumaSource,
@@ -185,11 +191,145 @@ class AkumaClient:
         # spuriously (Gemini round-3 F2; Go and TS SDKs already
         # short-circuit the same way).
 
+        # PR 1c: provenance is defined only for completed results; the same
+        # forward-compat scoping applies — strictly require an object shape only
+        # on `completed`, and leave the raw payload on `raw_response` for any
+        # other status.
+        parsed_provenance: AkumaProvenance | None = None
+        if status == "completed":
+            provenance_payload = result.get("provenance")
+            if provenance_payload is not None:
+                if not isinstance(provenance_payload, dict):
+                    raise KaizenError(
+                        "interactive query response provenance must be an object",
+                        code="INVALID_RESPONSE",
+                        data=result,
+                    )
+                # provenanceFidelity is the load-bearing field — without it a
+                # client cannot tell full from limited provenance.
+                fidelity = provenance_payload.get("provenanceFidelity")
+                if not isinstance(fidelity, str) or fidelity.strip() == "":
+                    raise KaizenError(
+                        "interactive query response provenance missing provenanceFidelity",
+                        code="INVALID_RESPONSE",
+                        data=result,
+                    )
+                parsed_provenance = self._parse_provenance(provenance_payload)
+
         return AkumaInteractiveQueryResponse(
             status=status,
             result=parsed_result,
             clarification=parsed_clarification,
+            provenance=parsed_provenance,
             raw_response=result,
+        )
+
+    @staticmethod
+    def _parse_provenance(payload: dict[str, Any]) -> AkumaProvenance:
+        """Map the camelCase wire provenance onto snake_case dataclasses.
+
+        Absent arrays normalize to empty; PRESENT contents must be well-typed
+        and fail closed otherwise — parity with the Go SDK, whose typed
+        unmarshal rejects off-type fields (Claude round-3 F2). Missing scalar
+        fields map to Go's zero values ("" / None); present-but-mistyped
+        scalars fail closed.
+        """
+
+        def malformed(detail: str) -> KaizenError:
+            return KaizenError(
+                f"interactive query response provenance malformed: {detail}",
+                code="INVALID_RESPONSE",
+                data=payload,
+            )
+
+        def str_list(field: str, value: Any) -> list[str]:
+            if value is None:
+                return []
+            if not isinstance(value, list):
+                raise malformed(f"{field} must be an array")
+            for item in value:
+                if not isinstance(item, str):
+                    raise malformed(f"{field} entries must be strings")
+            return list(value)
+
+        def obj_list(field: str, value: Any) -> list[dict[str, Any]]:
+            if value is None:
+                return []
+            if not isinstance(value, list):
+                raise malformed(f"{field} must be an array")
+            for item in value:
+                if not isinstance(item, dict):
+                    raise malformed(f"{field} entries must be objects")
+            return list(value)
+
+        def str_field(field: str, entry: dict[str, Any], key: str) -> str:
+            value = entry.get(key)
+            if value is None:
+                return ""
+            if not isinstance(value, str):
+                raise malformed(f"{field}.{key} must be a string")
+            return value
+
+        def opt_str_field(field: str, entry: dict[str, Any], key: str) -> str | None:
+            value = entry.get(key)
+            if value is None:
+                return None
+            if not isinstance(value, str):
+                raise malformed(f"{field}.{key} must be a string")
+            return value
+
+        # The caller has already validated provenanceFidelity is a non-empty
+        # string (fail-closed); no silent default here (Claude round-2 L6).
+        fidelity = str_field("provenance", payload, "provenanceFidelity")
+        dialect = str_field("provenance", payload, "dialect")
+
+        joins = [
+            AkumaProvenanceJoin(
+                type=str_field("joins", entry, "type"),
+                left=opt_str_field("joins", entry, "left"),
+                right=opt_str_field("joins", entry, "right"),
+                condition=opt_str_field("joins", entry, "condition"),
+            )
+            for entry in obj_list("joins", payload.get("joins"))
+        ]
+        filters = [
+            AkumaProvenanceFilter(
+                clause=str_field("filters", entry, "clause"),
+                expression=str_field("filters", entry, "expression"),
+            )
+            for entry in obj_list("filters", payload.get("filters"))
+        ]
+        projections = [
+            AkumaProvenanceProjection(
+                expression=str_field("projections", entry, "expression"),
+                alias=opt_str_field("projections", entry, "alias"),
+            )
+            for entry in obj_list("projections", payload.get("projections"))
+        ]
+        warnings = [
+            AkumaProvenanceWarning(
+                category=str_field("warnings", entry, "category"),
+                detail=opt_str_field("warnings", entry, "detail"),
+            )
+            for entry in obj_list("warnings", payload.get("warnings"))
+        ]
+        agg_raw = payload.get("aggregations")
+        if agg_raw is not None and not isinstance(agg_raw, dict):
+            raise malformed("aggregations must be an object")
+        agg = agg_raw or {}
+        aggregations = AkumaProvenanceAggregations(
+            group_by=str_list("aggregations.groupBy", agg.get("groupBy")),
+            functions=str_list("aggregations.functions", agg.get("functions")),
+        )
+        return AkumaProvenance(
+            provenance_fidelity=fidelity,
+            dialect=dialect,
+            tables=str_list("tables", payload.get("tables")),
+            joins=joins,
+            filters=filters,
+            projections=projections,
+            aggregations=aggregations,
+            warnings=warnings,
         )
 
     @staticmethod
