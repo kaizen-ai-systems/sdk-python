@@ -673,6 +673,13 @@ def test_enzan_pricing_refresh_trigger_and_log_and_providers():
                         "name": "manual",
                         "kind": "manual",
                         "enabled": True,
+                        "envAllowed": True,
+                        "effectiveEnabled": True,
+                        "manualOfferWriteEnabled": True,
+                        "requiresSecret": False,
+                        "secretConfigured": False,
+                        "credentialSource": "none",
+                        "hasLegacyDbSecret": False,
                         "refreshIntervalHours": 24,
                         "hasAdapter": True,
                     }
@@ -696,6 +703,7 @@ def test_enzan_pricing_refresh_trigger_and_log_and_providers():
     assert len(providers) == 1
     assert providers[0].has_adapter is True
     assert providers[0].kind == "manual"
+    assert providers[0].manual_offer_write_enabled is True
 
 
 def test_enzan_pricing_refresh_log_passes_limit_through_for_server_clamping():
@@ -848,6 +856,12 @@ def test_enzan_pricing_providers_raises_when_required_field_is_missing():
                         "name": "aws",
                         "kind": "api",
                         # `enabled` and `hasAdapter` intentionally omitted
+                        "envAllowed": True,
+                        "effectiveEnabled": False,
+                        "requiresSecret": False,
+                        "secretConfigured": False,
+                        "credentialSource": "none",
+                        "hasLegacyDbSecret": False,
                         "refreshIntervalHours": 24,
                     }
                 ]
@@ -870,6 +884,13 @@ def test_enzan_pricing_providers_handles_optional_freshness_fields():
                         "name": "aws",
                         "kind": "api",
                         "enabled": True,
+                        "envAllowed": True,
+                        "effectiveEnabled": False,
+                        "disabledReason": "unsupported_source",
+                        "requiresSecret": False,
+                        "secretConfigured": False,
+                        "credentialSource": "none",
+                        "hasLegacyDbSecret": False,
                         "refreshIntervalHours": 24,
                         "hasAdapter": False,
                     }
@@ -884,6 +905,88 @@ def test_enzan_pricing_providers_handles_optional_freshness_fields():
     assert providers[0].last_success_at is None
     assert providers[0].last_failure_at is None
     assert providers[0].last_error is None
+
+
+def test_enzan_pricing_providers_defaults_new_readiness_fields_for_legacy_response():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/pricing/providers": {
+                "providers": [
+                    {
+                        "id": "44444444-4444-4444-4444-444444444444",
+                        "name": "manual",
+                        "kind": "manual",
+                        "enabled": True,
+                        "refreshIntervalHours": 24,
+                        "hasAdapter": True,
+                    }
+                ]
+            }
+        }
+    )
+    client = EnzanClient(fake)
+    providers = client.list_pricing_providers()
+
+    assert len(providers) == 1
+    assert providers[0].env_allowed is None
+    assert providers[0].effective_enabled is None
+    assert providers[0].manual_offer_write_enabled is None
+    assert providers[0].requires_secret is None
+    assert providers[0].secret_configured is None
+    assert providers[0].credential_source is None
+    assert providers[0].has_legacy_db_secret is None
+
+
+def test_enzan_pricing_providers_rejects_wrong_typed_optional_readiness_field():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/pricing/providers": {
+                "providers": [
+                    {
+                        "id": "44444444-4444-4444-4444-444444444444",
+                        "name": "manual",
+                        "kind": "manual",
+                        "enabled": True,
+                        "refreshIntervalHours": 24,
+                        "hasAdapter": True,
+                        "effectiveEnabled": "false",
+                    }
+                ]
+            }
+        }
+    )
+    client = EnzanClient(fake)
+
+    with pytest.raises(KaizenError) as exc_info:
+        client.list_pricing_providers()
+    assert exc_info.value.data["container"] == "provider"
+    assert exc_info.value.data["field"] == "effectiveEnabled"
+
+
+def test_enzan_pricing_providers_rejects_wrong_typed_disabled_reason():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/pricing/providers": {
+                "providers": [
+                    {
+                        "id": "44444444-4444-4444-4444-444444444444",
+                        "name": "manual",
+                        "kind": "manual",
+                        "enabled": True,
+                        "refreshIntervalHours": 24,
+                        "hasAdapter": True,
+                        "disabledReason": False,
+                    }
+                ]
+            }
+        }
+    )
+    client = EnzanClient(fake)
+
+    with pytest.raises(KaizenError) as exc_info:
+        client.list_pricing_providers()
+    assert exc_info.value.data["container"] == "provider"
+    assert exc_info.value.data["field"] == "disabledReason"
 
 
 def test_enzan_upsert_pricing_offer_gpu():

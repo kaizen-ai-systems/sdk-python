@@ -324,28 +324,41 @@ class EnzanClient:
     def list_pricing_providers(self) -> list[EnzanPricingProvider]:
         """List registered live-pricing sources (admin view).
 
-        Required fields use _required so server contract drift surfaces as
-        KaizenError rather than silently producing providers with empty
-        identifiers or `enabled=False` / `has_adapter=False` defaults that
-        could mislead an operator. Matches the strictness applied to log
-        entries and offer responses.
+        Legacy identity/freshness fields use _required so server contract
+        drift still surfaces as KaizenError. Readiness fields added after the
+        original provider shape are defaulted for compatibility with older
+        deployments and partial admin mocks.
         """
 
         result = self._http.get("/v1/enzan/pricing/providers")
-        return [
-            EnzanPricingProvider(
-                id=_required(row, "id", "provider"),
-                name=_required(row, "name", "provider"),
-                kind=_required(row, "kind", "provider"),
-                enabled=_required(row, "enabled", "provider"),
-                refresh_interval_hours=_required(row, "refreshIntervalHours", "provider"),
-                has_adapter=_required(row, "hasAdapter", "provider"),
-                last_success_at=row.get("lastSuccessAt"),
-                last_failure_at=row.get("lastFailureAt"),
-                last_error=row.get("lastError"),
+        providers: list[EnzanPricingProvider] = []
+        for row in result.get("providers", []):
+            enabled = _required(row, "enabled", "provider")
+            has_adapter = _required(row, "hasAdapter", "provider")
+            providers.append(
+                EnzanPricingProvider(
+                    id=_required(row, "id", "provider"),
+                    name=_required(row, "name", "provider"),
+                    kind=_required(row, "kind", "provider"),
+                    enabled=enabled,
+                    refresh_interval_hours=_required(row, "refreshIntervalHours", "provider"),
+                    has_adapter=has_adapter,
+                    env_allowed=_optional_bool(row, "envAllowed", "provider"),
+                    effective_enabled=_optional_bool(row, "effectiveEnabled", "provider"),
+                    manual_offer_write_enabled=_optional_bool(
+                        row, "manualOfferWriteEnabled", "provider"
+                    ),
+                    requires_secret=_optional_bool(row, "requiresSecret", "provider"),
+                    secret_configured=_optional_bool(row, "secretConfigured", "provider"),
+                    credential_source=_optional_str(row, "credentialSource", "provider"),
+                    has_legacy_db_secret=_optional_bool(row, "hasLegacyDbSecret", "provider"),
+                    disabled_reason=_optional_str(row, "disabledReason", "provider"),
+                    last_success_at=row.get("lastSuccessAt"),
+                    last_failure_at=row.get("lastFailureAt"),
+                    last_error=row.get("lastError"),
+                )
             )
-            for row in result.get("providers", [])
-        ]
+        return providers
 
     def upsert_pricing_offer(
         self,
@@ -900,6 +913,34 @@ def _required(row: dict[str, Any], key: str, container: str) -> Any:
 
 
 _MISSING: Any = object()
+
+
+def _optional_bool(row: dict[str, Any], key: str, container: str) -> bool | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        from ..errors import KaizenError
+
+        raise KaizenError(
+            f"server response field {container}.{key} must be a boolean when present",
+            data={"container": container, "field": key, "received": row},
+        )
+    return value
+
+
+def _optional_str(row: dict[str, Any], key: str, container: str) -> str | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        from ..errors import KaizenError
+
+        raise KaizenError(
+            f"server response field {container}.{key} must be a string when present",
+            data={"container": container, "field": key, "received": row},
+        )
+    return value
 
 
 def _gpu_offer_from_dict(row: dict[str, Any]) -> EnzanGPUOffer:

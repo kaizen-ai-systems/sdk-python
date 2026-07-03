@@ -258,6 +258,14 @@ class EnzanPricingProvider:
     last_success_at: str | None = None
     last_failure_at: str | None = None
     last_error: str | None = None
+    disabled_reason: str | None = None
+    env_allowed: bool | None = None
+    effective_enabled: bool | None = None
+    manual_offer_write_enabled: bool | None = None
+    requires_secret: bool | None = None
+    secret_configured: bool | None = None
+    credential_source: str | None = None
+    has_legacy_db_secret: bool | None = None
 
 
 @dataclass
