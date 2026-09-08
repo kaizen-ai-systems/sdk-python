@@ -23,6 +23,7 @@ from ..models import (
     EnzanGPUOfferUpsertPayload,
     EnzanGPUPricing,
     EnzanGPUPricingMutationResponse,
+    EnzanLiveOfferFilter,
     EnzanLLMOffer,
     EnzanLLMOfferUpsertPayload,
     EnzanLLMPricing,
@@ -36,6 +37,9 @@ from ..models import (
     EnzanPricingProvider,
     EnzanPricingRefreshLogEntry,
     EnzanPricingRefreshTriggerResponse,
+    EnzanPricingSearchRequest,
+    EnzanPricingSearchResponse,
+    EnzanPricingSearchResult,
     EnzanRecommendation,
     EnzanResource,
     EnzanRoutingConfig,
@@ -280,6 +284,45 @@ class EnzanClient:
         return EnzanPricingRefreshTriggerResponse(
             status=_required(result, "status", "refresh_trigger"),
             triggered_by=_required(result, "triggeredBy", "refresh_trigger"),
+        )
+
+    def search_pricing(
+        self, request: EnzanPricingSearchRequest | None = None
+    ) -> EnzanPricingSearchResponse:
+        """Search active live GPU offers with deterministic server ranking."""
+
+        request = request or EnzanPricingSearchRequest()
+        payload: dict[str, Any] = {}
+        if request.gpu_types is not None:
+            payload["gpuTypes"] = request.gpu_types
+        if request.providers is not None:
+            payload["providers"] = request.providers
+        if request.min_cluster_size is not None:
+            payload["minClusterSize"] = request.min_cluster_size
+        if request.training_ready is not None:
+            payload["trainingReady"] = request.training_ready
+        if request.regions is not None:
+            payload["regions"] = request.regions
+        if request.commitment_types is not None:
+            payload["commitmentTypes"] = request.commitment_types
+        if request.max_hourly_rate is not None:
+            payload["maxHourlyRate"] = request.max_hourly_rate
+        if request.anchor_rate_usd is not None:
+            payload["anchorRateUSD"] = request.anchor_rate_usd
+        if request.ranking_mode is not None:
+            payload["rankingMode"] = request.ranking_mode
+        if request.limit is not None:
+            payload["limit"] = request.limit
+
+        result = self._http.post("/v1/enzan/pricing/search", payload)
+        filter_row = _required(result, "filter", "pricing_search")
+        result_rows = _required(result, "results", "pricing_search")
+        return EnzanPricingSearchResponse(
+            filter=_live_offer_filter_from_dict(filter_row),
+            results=[_pricing_search_result_from_dict(row) for row in result_rows],
+            freshness=_required(result, "freshness", "pricing_search"),
+            refreshed_at=result.get("refreshedAt"),
+            source_mix=_required(result, "sourceMix", "pricing_search"),
         )
 
     def list_pricing_refresh_log(
@@ -968,6 +1011,28 @@ def _gpu_offer_from_dict(row: dict[str, Any]) -> EnzanGPUOffer:
         source_id=row.get("sourceId"),
         source_url=row.get("sourceUrl"),
         source_fingerprint=row.get("sourceFingerprint"),
+    )
+
+
+def _live_offer_filter_from_dict(row: dict[str, Any]) -> EnzanLiveOfferFilter:
+    return EnzanLiveOfferFilter(
+        gpu_types=row.get("gpuTypes"),
+        providers=row.get("providers"),
+        min_cluster_size=row.get("minClusterSize"),
+        training_ready=row.get("trainingReady"),
+        regions=row.get("regions"),
+        commitment_types=row.get("commitmentTypes"),
+        max_hourly_rate=row.get("maxHourlyRate"),
+        anchor_rate_usd=row.get("anchorRateUSD"),
+    )
+
+
+def _pricing_search_result_from_dict(row: dict[str, Any]) -> EnzanPricingSearchResult:
+    offer = _gpu_offer_from_dict(row)
+    return EnzanPricingSearchResult(
+        **offer.__dict__,
+        freshness=_required(row, "freshness", "pricing_search_result"),
+        reasons=_required(row, "reasons", "pricing_search_result"),
     )
 
 

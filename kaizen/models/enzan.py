@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .._types import AlertType, CreatableAlertType
@@ -270,7 +270,12 @@ class EnzanPricingProvider:
 
 @dataclass
 class EnzanGPUOfferUpsertPayload:
-    """Manual GPU offer upsert payload."""
+    """Manual GPU offer upsert payload.
+
+    A terminal ``-<count>x`` in ``gpu_type`` is the sole supported encoding
+    for more than one GPU per buyable instance. Unsuffixed or malformed values
+    mean one GPU per instance, and the source-authored value is preserved.
+    """
 
     provider: str
     gpu_type: str
@@ -368,6 +373,58 @@ class EnzanPricingOfferUpsertResponse:
     status: str
     gpu: EnzanGPUOffer | None = None
     llm: EnzanLLMOffer | None = None
+
+
+@dataclass
+class EnzanLiveOfferFilter:
+    """Live GPU offer filter.
+
+    Cluster sizes count buyable instances and hourly rates are per instance.
+    A terminal ``-<count>x`` GPU type suffix is GPUs per buyable instance.
+    """
+
+    gpu_types: list[str] | None = None
+    providers: list[str] | None = None
+    min_cluster_size: int | None = None
+    training_ready: bool | None = None
+    regions: list[str] | None = None
+    commitment_types: list[str] | None = None
+    max_hourly_rate: float | None = None
+    anchor_rate_usd: float | None = None
+
+
+@dataclass
+class EnzanPricingSearchRequest(EnzanLiveOfferFilter):
+    """Request for POST /v1/enzan/pricing/search.
+
+    ``cheapest_under_anchor`` requires ``anchor_rate_usd``;
+    ``best_training_fit`` returns only training-ready offers.
+    ``limit`` is optional (``None``); omission defaults to 20. Explicit values
+    must be integers from 1 through 100 inclusive; values outside that range
+    return HTTP 400.
+    """
+
+    ranking_mode: str | None = None
+    limit: int | None = None
+
+
+@dataclass
+class EnzanPricingSearchResult(EnzanGPUOffer):
+    """One deterministically ranked live GPU offer."""
+
+    freshness: str = ""
+    reasons: list[str] = field(default_factory=list)
+
+
+@dataclass
+class EnzanPricingSearchResponse:
+    """Response from POST /v1/enzan/pricing/search."""
+
+    filter: EnzanLiveOfferFilter
+    results: list[EnzanPricingSearchResult]
+    freshness: str
+    source_mix: dict[str, int]
+    refreshed_at: str | None = None
 
 
 @dataclass
@@ -553,6 +610,8 @@ class EnzanSuggestedAction:
 
     # set_window | view_summary | view_costs_by_model
     # | view_optimizer | view_model_pricing | view_gpu_pricing
+    # | view_live_pricing | refresh_pricing | compare_clusters
+    # | switch_to_options
     type: str
     label: str
     window: str | None = None

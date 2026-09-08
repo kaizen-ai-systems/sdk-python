@@ -8,6 +8,7 @@ from kaizen.models import (
     EnzanCreateAlertRequest,
     EnzanGPUOfferUpsertPayload,
     EnzanLLMOfferUpsertPayload,
+    EnzanPricingSearchRequest,
     EnzanUpdateAlertRequest,
 )
 from kaizen.services.enzan import EnzanClient
@@ -706,6 +707,71 @@ def test_enzan_pricing_refresh_trigger_and_log_and_providers():
     assert providers[0].manual_offer_write_enabled is True
 
 
+def test_enzan_pricing_search_posts_exact_filter_and_maps_results():
+    fake = FakeHttp(
+        {
+            "/v1/enzan/pricing/search": {
+                "filter": {"gpuTypes": ["h100"], "providers": ["runpod"], "minClusterSize": 2},
+                "results": [
+                    {
+                        "id": "offer-1",
+                        "provider": "runpod",
+                        "gpuType": "h100-8x",
+                        "displayName": "8x H100",
+                        "deploymentClass": "on_demand",
+                        "clusterSizeMin": 1,
+                        "clusterSizeMax": 8,
+                        "interconnectClass": "nvlink",
+                        "trainingReady": True,
+                        "hourlyRateUSD": 10.0,
+                        "currency": "USD",
+                        "sourceType": "adapter",
+                        "trustStatus": "verified",
+                        "fetchedAt": "2026-09-02T12:00:00Z",
+                        "firstSeenAt": "2026-09-02T12:00:00Z",
+                        "lastSeenAt": "2026-09-02T12:00:00Z",
+                        "active": True,
+                        "freshness": "fresh",
+                        "reasons": ["verified source"],
+                    }
+                ],
+                "freshness": "fresh",
+                "refreshedAt": "2026-09-02T12:00:00Z",
+                "sourceMix": {"adapter": 1},
+            }
+        }
+    )
+    client = EnzanClient(fake)
+    result = client.search_pricing(
+        EnzanPricingSearchRequest(
+            gpu_types=["h100"],
+            providers=["runpod"],
+            min_cluster_size=2,
+            training_ready=False,
+            ranking_mode="cheapest",
+            limit=5,
+        )
+    )
+
+    assert result.results[0].gpu_type == "h100-8x"
+    assert result.results[0].freshness == "fresh"
+    assert result.source_mix == {"adapter": 1}
+    assert fake.calls == [
+        (
+            "POST",
+            "/v1/enzan/pricing/search",
+            {
+                "gpuTypes": ["h100"],
+                "providers": ["runpod"],
+                "minClusterSize": 2,
+                "trainingReady": False,
+                "rankingMode": "cheapest",
+                "limit": 5,
+            },
+        )
+    ]
+
+
 def test_enzan_pricing_refresh_log_passes_limit_through_for_server_clamping():
     fake = FakeHttp({"/v1/enzan/pricing/refresh/log?limit=500": {"entries": []}})
     client = EnzanClient(fake)
@@ -745,6 +811,10 @@ def test_8_2_public_types_exported_from_package_root():
         "EnzanPricingProvider",
         "EnzanPricingRefreshLogEntry",
         "EnzanPricingRefreshTriggerResponse",
+        "EnzanLiveOfferFilter",
+        "EnzanPricingSearchRequest",
+        "EnzanPricingSearchResponse",
+        "EnzanPricingSearchResult",
     ]
     for name in expected:
         assert hasattr(kaizen, name), f"{name} missing from kaizen package root"
