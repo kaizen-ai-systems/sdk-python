@@ -9,6 +9,10 @@ class Guardrails:
     """Security guardrails for Akuma queries."""
 
     read_only: bool = True
+    # Canonical physical names in all modes; empty disables this check.
+    # Nonempty requires postgres/mysql extraction; unsupported SQL fails closed.
+    # Qualification is exact; unquoted Postgres entries fold, quoted entries are
+    # byte-exact, and MySQL is case-sensitive. See https://www.kaizenaisystems.com/docs for limits.
     allow_tables: list[str] | None = None
     deny_tables: list[str] | None = None
     deny_columns: list[str] | None = None
