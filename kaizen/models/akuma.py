@@ -66,6 +66,8 @@ class AkumaClarification:
     question: str
     options: list[AkumaClarificationOption]
     expires_at: str
+    kind: str | None = None
+    metric_candidates: list[AkumaMetricCandidate] | None = None
 
 
 @dataclass
@@ -147,6 +149,7 @@ class AkumaInteractiveQueryResponse:
     clarification: AkumaClarification | None = None
     provenance: AkumaProvenance | None = None
     raw_response: dict[str, Any] | None = None
+    metric: AkumaMetric | None = None
 
 
 @dataclass
@@ -245,3 +248,144 @@ class AkumaSourceMutationResponse:
 
 
 AkumaSchemaResponse = AkumaSourceMutationResponse
+
+
+@dataclass
+class AkumaMetricFilter:
+    column: str
+    keep: bool
+
+
+@dataclass
+class AkumaMetricRecipe:
+    table: str
+    measure: str
+    date_column: str
+    filter: AkumaMetricFilter | None
+
+
+@dataclass
+class AkumaMetricFieldStatus:
+    table: str
+    measure: str
+    date: str
+    filter: str
+
+
+@dataclass
+class AkumaMetricCandidate:
+    option_id: str
+    recipe: AkumaMetricRecipe
+    field_status: AkumaMetricFieldStatus
+    saved_version: int | None = None
+
+
+@dataclass
+class AkumaMetricDefinition:
+    id: str
+    term: str
+    version: int
+    created_at: str
+    recipe: AkumaMetricRecipe
+    field_status: AkumaMetricFieldStatus
+
+
+@dataclass
+class AkumaMetricActive:
+    id: str
+    version: int
+    recipe_digest: str
+
+
+@dataclass
+class AkumaMetricMonth:
+    label: str
+    start: str
+    end_exclusive: str
+
+
+@dataclass
+class AkumaMetricReadBackField:
+    field: str
+    value: str
+    status: str
+
+
+@dataclass
+class AkumaMetricReadBack:
+    fields: list[AkumaMetricReadBackField]
+    checked: list[str]
+    not_verified: list[str]
+
+
+@dataclass
+class AkumaMetric:
+    """Applied, then reason, identify executed, note and refusal member sets."""
+
+    applied: bool
+    reason: str | None = None
+    detail: str | None = None
+    term: str | None = None
+    definition_id: str | None = None
+    version: int | None = None
+    origin: str | None = None
+    recipe: AkumaMetricRecipe | None = None
+    recipe_digest: str | None = None
+    sql_digest: str | None = None
+    month: AkumaMetricMonth | None = None
+    read_back: AkumaMetricReadBack | None = None
+    computed_at: str | None = None
+    status: str | None = None
+    active_at_completion: AkumaMetricActive | None = None
+    checked_at: str | None = None
+    canonical_prompt: str | None = None
+
+
+@dataclass
+class AkumaMetricDefinitionTokenRequest:
+    source_id: str
+    clarification_token: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"sourceId": self.source_id, "clarificationToken": self.clarification_token}
+
+
+@dataclass
+class AkumaMetricDefinitionRestoreRequest:
+    source_id: str
+    term: str
+    restore_version: int
+    expected_active_version: int | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "sourceId": self.source_id,
+            "term": self.term,
+            "restoreVersion": self.restore_version,
+            "expectedActiveVersion": self.expected_active_version,
+        }
+
+
+@dataclass
+class AkumaCreateMetricDefinitionResponse:
+    definition: AkumaMetricDefinition
+    superseded_version: int | None
+
+
+@dataclass
+class AkumaListMetricDefinitionsResponse:
+    definitions: list[AkumaMetricDefinition]
+
+
+@dataclass
+class AkumaForgetMetricDefinitionResponse:
+    definition: AkumaMetricDefinition
+
+
+@dataclass
+class AkumaMetricCodeError:
+    """Code stays in transport error.data, never in the transport error's code."""
+
+    error: str
+    code: str
+    request_id: str

@@ -599,3 +599,200 @@ def test_enzan_pricing_catalog_maps_responses():
     assert models[0].input_cost_per_1k_tokens_usd == 0.00015
     assert gpu.status == "upserted"
     assert gpu.pricing.gpu_type == "h100"
+
+# Recorded by API TestRespondAkumaInteractiveMetricRefusals.
+@pytest.mark.parametrize("body", [{'status': 'rejected', 'metric': {'applied': False, 'reason': 'metric_not_sure', 'term': 'order total'}, 'result': {'sql': '', 'error': 'No calculation was chosen, so no calculation ran and nothing was saved.'}}, {'status': 'rejected', 'metric': {'applied': False, 'reason': 'metric_no_candidate', 'term': 'order total'}, 'result': {'sql': '', 'error': 'Kaiclaw could not offer a checked calculation for this question, so no calculation ran.'}}, {'status': 'rejected', 'metric': {'applied': False, 'reason': 'metric_request_unrecognized'}, 'result': {'sql': '', 'error': 'This question does not match the supported saved-calculation form, so no calculation ran.'}}, {'status': 'rejected', 'metric': {'applied': False, 'reason': 'metric_unsupported_source'}, 'result': {'sql': '', 'error': 'Saved calculations need a Postgres data source, so no calculation ran.'}}, {'status': 'rejected', 'metric': {'applied': False, 'reason': 'metric_needs_recheck', 'detail': 'binding_changed', 'term': 'order total', 'definitionId': 'saved-id', 'version': 7}, 'result': {'sql': '', 'error': 'The table or source this calculation reads has changed since it was checked, so no calculation ran.'}}, {'status': 'rejected', 'metric': {'applied': False, 'reason': 'metric_needs_recheck', 'detail': 'binding_changed', 'term': 'order total'}, 'result': {'sql': '', 'error': 'The table or source this calculation reads has changed since it was checked, so no calculation ran.'}}, {'status': 'rejected', 'metric': {'applied': False, 'reason': 'metric_needs_recheck', 'detail': 'recipe_invalid', 'term': 'order total', 'definitionId': 'saved-id', 'version': 7}, 'result': {'sql': '', 'error': 'This calculation is no longer valid or allowed for this source, so no calculation ran.'}}, {'status': 'rejected', 'metric': {'applied': False, 'reason': 'metric_needs_recheck', 'detail': 'recipe_invalid', 'term': 'order total'}, 'result': {'sql': '', 'error': 'This calculation is no longer valid or allowed for this source, so no calculation ran.'}}, {'status': 'rejected', 'metric': {'applied': False, 'reason': 'metric_target_unverified', 'term': 'order total'}, 'result': {'sql': '', 'error': 'Kaiclaw could not confirm which database and schemas this source currently reads, so no calculation ran and no data was returned. Try again later, or ask without a saved calculation.'}}])
+def test_akuma_metric_recorded_refusals(body):
+    fake = FakeHttp({"/v1/akuma/queries/interactive": body})
+    result = AkumaClient(fake).query_interactive(dialect="postgres", prompt="x")
+    assert result.status == "rejected"
+    assert result.result.sql == ""
+    assert result.result.error == body["result"]["error"]
+    assert result.metric.reason == body["metric"]["reason"]
+    assert result.metric.applied is False
+    assert result.raw_response["metric"] == body["metric"]
+
+
+def test_akuma_metric_types_and_transports():
+    from kaizen import AkumaMetricDefinitionRestoreRequest, AkumaMetricDefinitionTokenRequest
+
+    definition = {
+        "id": "v1", "term": "order total", "version": 1,
+        "createdAt": "2026-11-14T00:00:00Z",
+        "recipe": {"table": "orders", "measure": "total", "dateColumn": "order_date", "filter": None},
+        "fieldStatus": {"table": "shown", "measure": "shown", "date": "shown", "filter": "chosen"},
+    }
+    created = {"definition": definition, "supersededVersion": None}
+    fake = FakeHttp({
+        "/v1/akuma/queries/interactive": {"status": "completed", "result": {"sql": "SELECT 1"}},
+        "/v1/akuma/query": {"sql": "SELECT 1"},
+        "/v1/akuma/metric-definitions": created,
+        "/v1/akuma/metric-definitions?sourceId=source%20%26%3F": {"definitions": [definition]},
+        ("DELETE", "/v1/akuma/metric-definitions/v1"): {"definition": definition},
+    })
+    client = AkumaClient(fake)
+    client.query_interactive(dialect="postgres", prompt="x", metric_action="teach")
+    assert fake.calls[-1][2]["metricAction"] == "teach"
+    client.query_interactive(dialect="postgres", prompt="x")
+    assert "metricAction" not in fake.calls[-1][2]
+    client.query(dialect="postgres", prompt="x")
+    assert "metricAction" not in fake.calls[-1][2]
+    client.consume_clarification("token", "c1", "once")
+    assert fake.calls[-1][2] == {"clarificationToken": "token", "optionId": "c1"}
+    first = client.create_metric_definition(AkumaMetricDefinitionTokenRequest("source", "token"), "key")
+    assert first.definition.created_at == definition["createdAt"]
+    assert first.definition.recipe.filter is None
+    assert first.superseded_version is None
+    assert fake.calls[-1] == (
+        "POST", "/v1/akuma/metric-definitions",
+        {"sourceId": "source", "clarificationToken": "token"}, {"Idempotency-Key": "key"},
+    )
+    assert client.create_metric_definition(AkumaMetricDefinitionTokenRequest("source", "token"), "key") == first
+    client.create_metric_definition(AkumaMetricDefinitionRestoreRequest("source", "order total", 1, None), "restore")
+    assert fake.calls[-1][2] == {
+        "sourceId": "source", "term": "order total", "restoreVersion": 1, "expectedActiveVersion": None,
+    }
+    listed = client.list_metric_definitions("source &?")
+    assert listed.definitions == [first.definition]
+    forgotten = client.forget_metric_definition("v1")
+    assert forgotten.definition == first.definition
+    assert fake.calls[-1][0:2] == ("DELETE", "/v1/akuma/metric-definitions/v1")
+
+
+@pytest.mark.parametrize("metric_filter", [None, {"column": "excluded", "keep": False}])
+def test_akuma_metric_candidate_types(metric_filter):
+    body = {"status": "needs_clarification", "clarification": {
+        "clarificationToken": "token", "question": "Calculation?", "expiresAt": "2030-01-01T00:00:00Z",
+        "options": [{"id": "c1", "label": "Calculation"}, {"id": "not_sure", "label": "Not sure"}],
+        "kind": "metric_proposal", "metricCandidates": [{
+            "optionId": "c1", "recipe": {"table": "orders", "measure": "total", "dateColumn": "order_date", "filter": metric_filter},
+            "fieldStatus": {"table": "shown", "measure": "shown", "date": "shown", "filter": "chosen"},
+            "savedVersion": 2,
+        }],
+    }}
+    result = AkumaClient(FakeHttp({"/v1/akuma/queries/interactive": body})).query_interactive(dialect="postgres", prompt="x")
+    assert result.clarification.kind == "metric_proposal"
+    candidate = result.clarification.metric_candidates[0]
+    assert candidate.option_id == "c1" and candidate.saved_version == 2
+    if metric_filter is None:
+        assert candidate.recipe.filter is None
+    else:
+        assert candidate.recipe.filter.keep is False
+    assert result.raw_response["clarification"] == body["clarification"]
+
+
+def _metric_regression_body(surface):
+    recipe = {"table": "orders", "measure": "total", "dateColumn": "order_date",
+              "filter": {"column": "excluded", "keep": False, "future": True}, "future": True}
+    fields = {"table": "shown", "measure": "shown", "date": "shown", "filter": "chosen", "future": True}
+    definition = {"id": "v1", "term": "order total", "version": 1, "createdAt": "2026-11-14T00:00:00Z",
+                  "recipe": recipe, "fieldStatus": fields, "future": True}
+    if surface == "card":
+        return {"status": "needs_clarification", "clarification": {
+            "clarificationToken": "token", "question": "Which?", "expiresAt": "2030-01-01T00:00:00Z",
+            "options": [{"id": "c1", "label": "One"}, {"id": "not_sure", "label": "Not sure"}],
+            "kind": "metric_proposal", "metricCandidates": [{"optionId": "c1", "recipe": recipe,
+                "fieldStatus": fields, "savedVersion": 1, "future": True}]}}
+    if surface == "metric":
+        return {"status": "completed", "result": {"sql": "SELECT 1"}, "metric": {
+            "applied": True, "term": "order total", "origin": "this_question", "recipe": recipe,
+            "recipeDigest": "recipe", "sqlDigest": "sql", "computedAt": "now", "checkedAt": "now",
+            "status": "unsaved", "activeAtCompletion": None, "canonicalPrompt": "question",
+            "month": {"label": "February 2025", "start": "2025-02-01", "endExclusive": "2025-03-01", "future": True},
+            "readBack": {"fields": [{"field": "filter", "value": "excluded IS FALSE", "status": "chosen", "future": True}],
+                         "checked": ["mechanical"], "notVerified": ["meaning"], "future": True}, "future": True}}
+    if surface == "list":
+        return {"definitions": [definition], "future": True}
+    return {"definition": definition, "supersededVersion": None, "future": True}
+
+
+def _metric_regression_call(surface, body):
+    from kaizen import AkumaMetricDefinitionTokenRequest
+    routes = {"/v1/akuma/queries/interactive": body, "/v1/akuma/metric-definitions": body,
+              "/v1/akuma/metric-definitions?sourceId=source": body,
+              ("DELETE", "/v1/akuma/metric-definitions/v1"): body}
+    client = AkumaClient(FakeHttp(routes))
+    if surface in {"card", "metric"}:
+        return client.query_interactive(dialect="postgres", prompt="x")
+    if surface == "create":
+        return client.create_metric_definition(AkumaMetricDefinitionTokenRequest("source", "token"), "key")
+    if surface == "list":
+        return client.list_metric_definitions("source")
+    return client.forget_metric_definition("v1")
+
+
+@pytest.mark.parametrize("surface", ["card", "metric", "create", "list", "forget"])
+def test_akuma_metric_additive_nested_members(surface):
+    body = _metric_regression_body(surface)
+    result = _metric_regression_call(surface, body)
+    if surface == "card":
+        assert result.clarification.metric_candidates[0].recipe.filter.keep is False
+        assert result.raw_response is body
+    elif surface == "metric":
+        assert result.metric.read_back.fields[0].status == "chosen"
+        assert result.raw_response is body
+    else:
+        definition = result.definitions[0] if surface == "list" else result.definition
+        assert definition.recipe.filter.keep is False and definition.version == 1
+
+
+@pytest.mark.parametrize("surface,path,value", [
+    ("card", ["clarification", "metricCandidates", 0, "optionId"], None),
+    ("card", ["clarification", "metricCandidates", 0, "fieldStatus", "table"], 5),
+    ("card", ["clarification", "metricCandidates", 0, "recipe", "filter", "keep"], "false"),
+    ("card", ["clarification", "metricCandidates"], {}),
+    ("metric", ["metric", "applied"], None),
+    ("metric", ["metric", "month", "label"], None),
+    ("metric", ["metric", "recipe", "measure"], 5),
+    ("metric", ["metric", "readBack", "fields", 0, "value"], None),
+    ("metric", ["metric", "readBack", "checked"], "mechanical"),
+    ("metric", ["metric", "activeAtCompletion"], {"id": "x", "version": "1", "recipeDigest": "x"}),
+    ("create", ["definition", "createdAt"], None),
+    ("create", ["definition", "version"], True),
+    ("list", ["definitions", 0, "fieldStatus", "filter"], None),
+    ("list", ["definitions"], None),
+    ("forget", ["definition", "recipe"], []),
+    ("forget", ["definition"], None),
+])
+def test_akuma_metric_malformed_required_data_is_transport_error(surface, path, value):
+    body = _metric_regression_body(surface)
+    pending = [body]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, dict):
+            item.pop("future", None)
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+    target = body
+    for part in path[:-1]:
+        target = target[part]
+    if value is None:
+        del target[path[-1]]
+    else:
+        target[path[-1]] = value
+    with pytest.raises(KaizenError) as caught:
+        _metric_regression_call(surface, body)
+    assert caught.value.code == "INVALID_RESPONSE"
+    assert caught.value.data == body
+
+
+def test_akuma_metric_unknown_kind_and_status_keep_raw():
+    body = _metric_regression_body("card")
+    body["clarification"]["kind"] = "future_kind"
+    body["clarification"]["metricCandidates"] = [{}]
+    result = _metric_regression_call("card", body)
+    assert result.clarification.metric_candidates is None
+    assert result.raw_response is body
+    future = {"status": "future_status", "metric": {"applied": {"future": True}}}
+    result = _metric_regression_call("metric", future)
+    assert result.metric is None and result.raw_response is future
+
+
+@pytest.mark.parametrize("reason", ["skipped_by_user", "wording_not_exact", "mode_not_results"])
+def test_akuma_metric_notes_keep_typed_and_raw(reason):
+    body = {"status": "completed", "result": {"sql": "SELECT 1"},
+            "metric": {"applied": False, "reason": reason, "term": "order total", "future": True}}
+    result = _metric_regression_call("metric", body)
+    assert result.metric.reason == reason and result.metric.applied is False
+    assert result.metric.term == "order total" and result.raw_response is body

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 from .._types import QueryMode, SQLDialect
 from ..errors import KaizenError
@@ -8,8 +9,23 @@ from ..http import HttpClient
 from ..models import (
     AkumaClarification,
     AkumaClarificationOption,
+    AkumaCreateMetricDefinitionResponse,
     AkumaExplainResponse,
+    AkumaForgetMetricDefinitionResponse,
     AkumaInteractiveQueryResponse,
+    AkumaListMetricDefinitionsResponse,
+    AkumaMetric,
+    AkumaMetricActive,
+    AkumaMetricCandidate,
+    AkumaMetricDefinition,
+    AkumaMetricDefinitionRestoreRequest,
+    AkumaMetricDefinitionTokenRequest,
+    AkumaMetricFieldStatus,
+    AkumaMetricFilter,
+    AkumaMetricMonth,
+    AkumaMetricReadBack,
+    AkumaMetricReadBackField,
+    AkumaMetricRecipe,
     AkumaProvenance,
     AkumaProvenanceAggregations,
     AkumaProvenanceFilter,
@@ -64,6 +80,7 @@ class AkumaClient:
         max_rows: int | None = None,
         guardrails: Guardrails | None = None,
         source_id: str | None = None,
+        metric_action: str | None = None,
     ) -> AkumaInteractiveQueryResponse:
         """Run a fresh query through the interactive Akuma protocol.
 
@@ -80,6 +97,9 @@ class AkumaClient:
             payload["guardrails"] = guardrails.to_dict()
         if source_id:
             payload["sourceId"] = source_id
+
+        if metric_action is not None:
+            payload["metricAction"] = metric_action
 
         result = self._http.post("/v1/akuma/queries/interactive", payload)
         return self._parse_interactive_response(result)
@@ -216,12 +236,23 @@ class AkumaClient:
                     )
                 parsed_provenance = self._parse_provenance(provenance_payload)
 
+        parsed_metric = None
+        if (
+            status in {"completed", "rejected", "needs_clarification"}
+            and result.get("metric") is not None
+        ):
+            try:
+                parsed_metric = _parse_metric(result["metric"])
+            except (KeyError, TypeError, ValueError, AttributeError) as error:
+                raise _metric_response_error(result) from error
+
         return AkumaInteractiveQueryResponse(
             status=status,
             result=parsed_result,
             clarification=parsed_clarification,
             provenance=parsed_provenance,
             raw_response=result,
+            metric=parsed_metric,
         )
 
     @staticmethod
@@ -395,11 +426,22 @@ class AkumaClient:
                 code="INVALID_RESPONSE",
                 data=raw,
             )
+        candidates = None
+        if payload.get("kind") == "metric_proposal":
+            try:
+                entries = payload["metricCandidates"]
+                if not isinstance(entries, list):
+                    raise ValueError("metricCandidates must be an array")
+                candidates = [_parse_metric_candidate(entry) for entry in entries]
+            except (KeyError, TypeError, ValueError, AttributeError) as error:
+                raise _metric_response_error(raw) from error
         return AkumaClarification(
             clarification_token=token,
             question=question,
             options=options,
             expires_at=expires_at,
+            kind=payload.get("kind"),
+            metric_candidates=candidates,
         )
 
     @staticmethod
@@ -412,6 +454,53 @@ class AkumaClient:
             warnings=result.get("warnings"),
             error=result.get("error"),
         )
+
+    def create_metric_definition(
+        self,
+        request: AkumaMetricDefinitionTokenRequest | AkumaMetricDefinitionRestoreRequest,
+        idempotency_key: str,
+    ) -> AkumaCreateMetricDefinitionResponse:
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+            raise KaizenError("idempotency_key is required", code="INVALID_REQUEST")
+        result = self._http.request(
+            "POST", "/v1/akuma/metric-definitions", request.to_dict(),
+            extra_headers={"Idempotency-Key": idempotency_key},
+        )
+        try:
+            superseded = result["supersededVersion"]
+            if superseded is not None:
+                superseded = _metric_version(superseded)
+            return AkumaCreateMetricDefinitionResponse(
+                definition=_parse_metric_definition(result["definition"]),
+                superseded_version=superseded,
+            )
+        except (KeyError, TypeError, ValueError, AttributeError) as error:
+            raise _metric_response_error(result) from error
+
+    def list_metric_definitions(self, source_id: str) -> AkumaListMetricDefinitionsResponse:
+        result = self._http.get(
+            "/v1/akuma/metric-definitions?sourceId=" + quote(source_id, safe="")
+        )
+        try:
+            entries = result["definitions"]
+            if not isinstance(entries, list):
+                raise ValueError("definitions must be an array")
+            return AkumaListMetricDefinitionsResponse(
+                definitions=[_parse_metric_definition(item) for item in entries]
+            )
+        except (KeyError, TypeError, ValueError, AttributeError) as error:
+            raise _metric_response_error(result) from error
+
+    def forget_metric_definition(self, definition_id: str) -> AkumaForgetMetricDefinitionResponse:
+        result = self._http.request(
+            "DELETE", "/v1/akuma/metric-definitions/" + quote(definition_id, safe="")
+        )
+        try:
+            return AkumaForgetMetricDefinitionResponse(
+                definition=_parse_metric_definition(result["definition"])
+            )
+        except (KeyError, TypeError, ValueError, AttributeError) as error:
+            raise _metric_response_error(result) from error
 
     def explain(self, sql: str) -> AkumaExplainResponse:
         result = self._http.post("/v1/akuma/explain", {"sql": sql})
@@ -495,4 +584,135 @@ def _parse_source_mutation(result: dict[str, Any]) -> AkumaSourceMutationRespons
         source_id=result.get("sourceId"),
         tables=result.get("tables"),
         source=source,
+    )
+
+
+
+def _metric_response_error(raw: Any) -> KaizenError:
+    return KaizenError(
+        "metric response malformed", code="INVALID_RESPONSE",
+        data=raw if isinstance(raw, dict) else {"response": raw},
+    )
+
+
+def _metric_string(payload: dict[str, Any], key: str) -> str:
+    value = payload[key]
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{key} must be a non-empty string")
+    return value
+
+
+def _metric_version(value: Any) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError("version must be a positive integer")
+    return value
+
+
+def _parse_metric_field_status(payload: dict[str, Any]) -> AkumaMetricFieldStatus:
+    return AkumaMetricFieldStatus(
+        table=_metric_string(payload, "table"), measure=_metric_string(payload, "measure"),
+        date=_metric_string(payload, "date"), filter=_metric_string(payload, "filter"),
+    )
+
+
+def _parse_metric_recipe(payload: dict[str, Any]) -> AkumaMetricRecipe:
+    metric_filter = payload["filter"]
+    parsed_filter = None
+    if metric_filter is not None:
+        if not isinstance(metric_filter, dict) or not isinstance(metric_filter.get("keep"), bool):
+            raise ValueError("filter must be null or a column and boolean keep")
+        parsed_filter = AkumaMetricFilter(
+            column=_metric_string(metric_filter, "column"), keep=metric_filter["keep"],
+        )
+    return AkumaMetricRecipe(
+        table=_metric_string(payload, "table"), measure=_metric_string(payload, "measure"),
+        date_column=_metric_string(payload, "dateColumn"), filter=parsed_filter,
+    )
+
+
+def _parse_metric_candidate(payload: dict[str, Any]) -> AkumaMetricCandidate:
+    saved = payload.get("savedVersion")
+    return AkumaMetricCandidate(
+        option_id=_metric_string(payload, "optionId"),
+        recipe=_parse_metric_recipe(payload["recipe"]),
+        field_status=_parse_metric_field_status(payload["fieldStatus"]),
+        saved_version=_metric_version(saved) if saved is not None else None,
+    )
+
+
+def _parse_metric_definition(payload: dict[str, Any]) -> AkumaMetricDefinition:
+    return AkumaMetricDefinition(
+        id=_metric_string(payload, "id"), term=_metric_string(payload, "term"),
+        version=_metric_version(payload["version"]),
+        created_at=_metric_string(payload, "createdAt"),
+        recipe=_parse_metric_recipe(payload["recipe"]),
+        field_status=_parse_metric_field_status(payload["fieldStatus"]),
+    )
+
+
+def _parse_metric(payload: dict[str, Any]) -> AkumaMetric:
+    if not isinstance(payload, dict) or not isinstance(payload.get("applied"), bool):
+        raise ValueError("metric requires boolean applied")
+    if payload["applied"]:
+        for field in [
+            "term", "origin", "recipeDigest", "sqlDigest", "computedAt", "status",
+            "checkedAt", "canonicalPrompt",
+        ]:
+            _metric_string(payload, field)
+        for field in ["recipe", "month", "readBack", "activeAtCompletion"]:
+            if field not in payload or (
+                field != "activeAtCompletion" and not isinstance(payload[field], dict)
+            ):
+                raise ValueError(f"metric requires {field}")
+    else:
+        _metric_string(payload, "reason")
+    for field in [
+        "reason", "detail", "term", "definitionId", "origin", "recipeDigest", "sqlDigest",
+        "computedAt", "status", "checkedAt", "canonicalPrompt",
+    ]:
+        if payload.get(field) is not None:
+            _metric_string(payload, field)
+    month = payload.get("month")
+    parsed_month = None
+    if month is not None:
+        parsed_month = AkumaMetricMonth(
+            _metric_string(month, "label"), _metric_string(month, "start"),
+            _metric_string(month, "endExclusive"),
+        )
+    active = payload.get("activeAtCompletion")
+    parsed_active = None
+    if active is not None:
+        parsed_active = AkumaMetricActive(
+            id=_metric_string(active, "id"), version=_metric_version(active["version"]),
+            recipe_digest=_metric_string(active, "recipeDigest"),
+        )
+    read_back = payload.get("readBack")
+    parsed_read_back = None
+    if read_back is not None:
+        for field in ["fields", "checked", "notVerified"]:
+            if not isinstance(read_back[field], list):
+                raise ValueError(f"readBack.{field} must be an array")
+        for field in ["checked", "notVerified"]:
+            if not all(isinstance(item, str) for item in read_back[field]):
+                raise ValueError(f"readBack.{field} entries must be strings")
+        parsed_read_back = AkumaMetricReadBack(
+            fields=[AkumaMetricReadBackField(
+                field=_metric_string(item, "field"), value=_metric_string(item, "value"),
+                status=_metric_string(item, "status"),
+            ) for item in read_back["fields"]],
+            checked=read_back["checked"], not_verified=read_back["notVerified"],
+        )
+    recipe = payload.get("recipe")
+    version = payload.get("version")
+    return AkumaMetric(
+        applied=payload["applied"], reason=payload.get("reason"), detail=payload.get("detail"),
+        term=payload.get("term"), definition_id=payload.get("definitionId"),
+        version=_metric_version(version) if version is not None else None,
+        origin=payload.get("origin"),
+        recipe=_parse_metric_recipe(recipe) if recipe is not None else None,
+        recipe_digest=payload.get("recipeDigest"), sql_digest=payload.get("sqlDigest"),
+        month=parsed_month, read_back=parsed_read_back,
+        computed_at=payload.get("computedAt"), status=payload.get("status"),
+        active_at_completion=parsed_active,
+        checked_at=payload.get("checkedAt"), canonical_prompt=payload.get("canonicalPrompt"),
     )

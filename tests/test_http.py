@@ -161,3 +161,30 @@ def test_http_client_handles_non_json_4xx_body_without_clobbering_data():
     assert exc_info.value.status == 400
     assert exc_info.value.data == {"error": "plain text error"}
     assert json.dumps(exc_info.value.data)
+
+
+@pytest.mark.parametrize("code", [
+    "token_not_found", "token_not_eligible", "source_mismatch", "target_unverified",
+    "binding_changed", "recipe_invalid", "definition_changed", "idempotency_key_reused",
+    "already_saved", "active_limit_reached", "history_limit_reached", "version_not_found",
+    "definition_superseded", "definition_not_found", None,
+])
+def test_akuma_metric_codes_stay_in_error_data(code):
+    status = 503 if code is None else (404 if code in {"token_not_found", "version_not_found", "definition_not_found"} else 409)
+    body = {"error": "fixed text", "request_id": "req"}
+    if code is not None:
+        body["code"] = code
+
+    def handler(_request):
+        return httpx.Response(status, json=body)
+
+    http = _make_client_with_transport(httpx.MockTransport(handler))
+    try:
+        with pytest.raises(KaizenError) as caught:
+            AkumaClient(http).list_metric_definitions("source")
+        assert caught.value.status == status
+        assert caught.value.code is None
+        assert caught.value.data == body
+        assert ("code" in caught.value.data) is (code is not None)
+    finally:
+        http.close()
