@@ -235,6 +235,9 @@ class AkumaSource:
     updated_at: str
     last_error: str | None = None
     last_synced_at: str | None = None
+    admission_mode: str | None = None
+    above_cap: bool | None = None
+    table_count_visible: int | None = None
 
 
 @dataclass

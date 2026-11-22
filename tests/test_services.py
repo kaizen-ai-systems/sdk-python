@@ -462,12 +462,38 @@ def test_akuma_consume_clarification_rejects_missing_fields(token, option, key):
     assert raised.value.code == "INVALID_REQUEST"
 
 
+@pytest.mark.parametrize(
+    "metadata, expected",
+    [
+        ({"admissionMode": "full", "aboveCap": False, "tableCountVisible": 0},
+         ("full", False, 0)),
+        ({"admissionMode": "probe_assisted", "aboveCap": True, "tableCountVisible": 101},
+         ("probe_assisted", True, 101)),
+        ({"admissionMode": "unknown", "aboveCap": False}, ("unknown", False, None)),
+        ({}, (None, None, None)),
+    ],
+)
+def test_akuma_list_sources_admission_metadata(metadata, expected):
+    fake = FakeHttp({"/v1/akuma/sources": {"sources": [{"id": "src_123", **metadata}]}})
+    source = AkumaClient(fake).list_sources()[0]
+    assert source.admission_mode == expected[0]
+    assert source.above_cap is expected[1]
+    assert source.table_count_visible == expected[2]
+    assert fake.calls == [("GET", "/v1/akuma/sources", None)]
+
+
 def test_akuma_create_source_maps_response():
     fake = FakeHttp(
         {
             "/v1/akuma/sources": {
                 "status": "syncing",
                 "sourceId": "src_123",
+                "source": {
+                    "id": "src_123",
+                    "admissionMode": "full",
+                    "aboveCap": False,
+                    "tableCountVisible": 0,
+                },
             }
         }
     )
@@ -481,6 +507,10 @@ def test_akuma_create_source_maps_response():
 
     assert result.status == "syncing"
     assert result.source_id == "src_123"
+    assert result.source is not None
+    assert result.source.admission_mode == "full"
+    assert result.source.above_cap is False
+    assert result.source.table_count_visible == 0
 
 
 def test_enzan_summary_maps_response():
@@ -736,6 +766,29 @@ def test_akuma_metric_additive_nested_members(surface):
         assert definition.recipe.filter.keep is False and definition.version == 1
 
 
+def test_metric_definitions_preserve_verbatim_identifiers():
+    body = _metric_regression_body("list")
+    recipe = body["definitions"][0]["recipe"]
+    recipe.update(table=" ", measure="  ", dateColumn="\t")
+    recipe["filter"]["column"] = " \t "
+    parsed = _metric_regression_call("list", body).definitions[0].recipe
+    assert (parsed.table, parsed.measure, parsed.date_column, parsed.filter.column) == (
+        " ", "  ", "\t", " \t ",
+    )
+
+
+def test_metric_read_back_preserves_verbatim_identifiers():
+    body = _metric_regression_body("metric")
+    metric = body["metric"]
+    metric["recipe"].update(table=" ", measure="  ", dateColumn="\t")
+    metric["readBack"]["fields"] = [
+        {"field": field, "value": value, "status": "shown"}
+        for field, value in (("table", " "), ("measure", "  "), ("date", "\t"))
+    ]
+    fields = _metric_regression_call("metric", body).metric.read_back.fields
+    assert [field.value for field in fields] == [" ", "  ", "\t"]
+
+
 @pytest.mark.parametrize("surface,path,value", [
     ("card", ["clarification", "metricCandidates", 0, "optionId"], None),
     ("card", ["clarification", "metricCandidates", 0, "fieldStatus", "table"], 5),
@@ -744,6 +797,8 @@ def test_akuma_metric_additive_nested_members(surface):
     ("metric", ["metric", "applied"], None),
     ("metric", ["metric", "month", "label"], None),
     ("metric", ["metric", "recipe", "measure"], 5),
+    ("list", ["definitions", 0, "recipe", "measure"], ""),
+    ("list", ["definitions", 0, "term"], " "),
     ("metric", ["metric", "readBack", "fields", 0, "value"], None),
     ("metric", ["metric", "readBack", "checked"], "mechanical"),
     ("metric", ["metric", "activeAtCompletion"], {"id": "x", "version": "1", "recipeDigest": "x"}),

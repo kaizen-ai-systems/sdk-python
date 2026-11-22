@@ -573,6 +573,9 @@ def _parse_source(result: dict[str, Any]) -> AkumaSource:
         updated_at=result.get("updatedAt", ""),
         last_error=result.get("lastError"),
         last_synced_at=result.get("lastSyncedAt"),
+        admission_mode=result.get("admissionMode"),
+        above_cap=result.get("aboveCap"),
+        table_count_visible=result.get("tableCountVisible"),
     )
 
 
@@ -595,9 +598,9 @@ def _metric_response_error(raw: Any) -> KaizenError:
     )
 
 
-def _metric_string(payload: dict[str, Any], key: str) -> str:
+def _metric_string(payload: dict[str, Any], key: str, *, identifier: bool = False) -> str:
     value = payload[key]
-    if not isinstance(value, str) or not value.strip():
+    if not isinstance(value, str) or not value or (not identifier and not value.strip()):
         raise ValueError(f"{key} must be a non-empty string")
     return value
 
@@ -622,11 +625,13 @@ def _parse_metric_recipe(payload: dict[str, Any]) -> AkumaMetricRecipe:
         if not isinstance(metric_filter, dict) or not isinstance(metric_filter.get("keep"), bool):
             raise ValueError("filter must be null or a column and boolean keep")
         parsed_filter = AkumaMetricFilter(
-            column=_metric_string(metric_filter, "column"), keep=metric_filter["keep"],
+            column=_metric_string(metric_filter, "column", identifier=True),
+            keep=metric_filter["keep"],
         )
     return AkumaMetricRecipe(
-        table=_metric_string(payload, "table"), measure=_metric_string(payload, "measure"),
-        date_column=_metric_string(payload, "dateColumn"), filter=parsed_filter,
+        table=_metric_string(payload, "table", identifier=True),
+        measure=_metric_string(payload, "measure", identifier=True),
+        date_column=_metric_string(payload, "dateColumn", identifier=True), filter=parsed_filter,
     )
 
 
@@ -697,7 +702,10 @@ def _parse_metric(payload: dict[str, Any]) -> AkumaMetric:
                 raise ValueError(f"readBack.{field} entries must be strings")
         parsed_read_back = AkumaMetricReadBack(
             fields=[AkumaMetricReadBackField(
-                field=_metric_string(item, "field"), value=_metric_string(item, "value"),
+                field=_metric_string(item, "field"),
+                value=_metric_string(
+                    item, "value", identifier=item["field"] in ("table", "measure", "date"),
+                ),
                 status=_metric_string(item, "status"),
             ) for item in read_back["fields"]],
             checked=read_back["checked"], not_verified=read_back["notVerified"],
